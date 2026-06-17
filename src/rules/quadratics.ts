@@ -164,7 +164,11 @@ export const simplifySqrt: Rule<NoParams> = {
     const node = findById(judgment.equation, location);
     if (node === undefined || node.kind !== "sqrt" || node.child.kind !== "int") return false;
     const n = node.child.value; // Integer invariant: n ≥ 0
-    return n === 0n || squareFreeFactor(n).coeff > 1n;
+    if (n === 0n) return true; // √0 → 0
+    const { coeff, radicand } = squareFreeFactor(n);
+    // A perfect square collapses fully (radicand 1 — covers √1 → 1, √49 → 7);
+    // otherwise fire only when there's a square factor to pull (√8 → 2√2).
+    return radicand === 1n || coeff > 1n;
   },
 
   apply(judgment, location, _params): RuleApplication {

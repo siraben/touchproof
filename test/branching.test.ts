@@ -202,6 +202,14 @@ describe("simplify-sqrt", () => {
     expect(simplifySqrt.precondition(jEight, eight.id, {})).toBe(true);
     const expected = equation(variable("x"), product([int(2), sqrt(int(2))]));
     expect(eq(simplifySqrt.apply(jEight, eight.id, {}).equation, expected)).toBe(true);
+
+    // √1 → 1 (a perfect square; common as a quadratic discriminant when D = 1)
+    const one = sqrt(int(1));
+    const jOne = mkJudgment(equation(variable("x"), one));
+    expect(simplifySqrt.precondition(jOne, one.id, {})).toBe(true);
+    expect(eq(simplifySqrt.apply(jOne, one.id, {}).equation, equation(variable("x"), int(1)))).toBe(
+      true,
+    );
   });
 
   it("rejects an already-simplest or negative radical", () => {
