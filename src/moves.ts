@@ -33,7 +33,13 @@ import { factorOutNegative } from "./rules/factorOutNegative.js";
 import { dropOneFactor, dropZeroTerm, powerOne, powerZero } from "./rules/identities.js";
 import { moveTermAcross } from "./rules/moveTermAcross.js";
 import { distributePower, negativeExponent, powerOfPower } from "./rules/powers.js";
-import { simplifySqrt, sqrtBothSides, zeroProduct } from "./rules/quadratics.js";
+import {
+  quadraticFormula,
+  readQuadratic,
+  simplifySqrt,
+  sqrtBothSides,
+  zeroProduct,
+} from "./rules/quadratics.js";
 import { coeffAndBody, splitTerm } from "./rules/splitTerm.js";
 import { quotientOfPowers } from "./rules/quotientOfPowers.js";
 import { squareBothSides } from "./rules/squareBothSides.js";
@@ -88,7 +94,11 @@ export function ruleById(id: string): AnyRule {
 export type AnyBranchingRule = BranchingRule<any>;
 
 /** Disjunctive rules: dispatched through Derivation.applyBranching. */
-export const allBranchingRules: readonly AnyBranchingRule[] = [sqrtBothSides, zeroProduct];
+export const allBranchingRules: readonly AnyBranchingRule[] = [
+  sqrtBothSides,
+  zeroProduct,
+  quadraticFormula,
+];
 
 const branchingRegistry = new Map(allBranchingRules.map((r) => [r.id, r]));
 
@@ -307,6 +317,12 @@ export function enumerateMoves(judgment: Judgment): Move[] {
     if (side.kind === "product") {
       pushBranching(zeroProduct, eqn.id, {}, side.id);
     }
+  }
+  // The quadratic formula: tap an expanded quadratic that equals zero. The
+  // handle is the quadratic side itself.
+  const quad = readQuadratic(eqn);
+  if (quad !== undefined) {
+    pushBranching(quadraticFormula, eqn.id, {}, quad.side.id);
   }
 
   // Both-sides moves, derived from each side's top-level structure.

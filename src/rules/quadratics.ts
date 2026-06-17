@@ -8,18 +8,23 @@
  * both, e.g. a = b = 0 under zero-product).
  */
 import { literalValue } from "./combineIntegers.js";
+import { coeffAndBody } from "./splitTerm.js";
 import {
   findById,
+  fraction,
   int,
   neg,
   replaceTermRespectingInvariants,
   sqrt,
+  sum,
+  variable,
+  variablesIn,
   type Equation,
   type Expr,
   type Pow,
   type Product,
 } from "../expr.js";
-import { exactToExpr } from "../eval.js";
+import { exactToExpr, rationalToExpr } from "../eval.js";
 import { Rational } from "../rational.js";
 import { squareFreeFactor, Surd } from "../surd.js";
 import {
@@ -183,5 +188,92 @@ export const simplifySqrt: Rule<NoParams> = {
         moved: [],
       },
     };
+  },
+};
+
+/** Read `a·x² + b·x + c = 0` (one side literal 0, the other an expanded
+ *  single-variable quadratic with INTEGER coefficients, a ≠ 0). Each term must
+ *  be a monomial cx⁰/cx/cx² — a product (factored) or fractional coefficient is
+ *  not recognized (zero-product / clearing denominators come first). */
+export function readQuadratic(
+  eqn: Equation,
+): { side: Expr; v: string; a: bigint; b: bigint; c: bigint } | undefined {
+  if (eqn.relation !== "=") return undefined;
+  let side: Expr;
+  if (literalValue(eqn.rhs) === 0n) side = eqn.lhs;
+  else if (literalValue(eqn.lhs) === 0n) side = eqn.rhs;
+  else return undefined;
+
+  const vars = variablesIn(side);
+  if (vars.size !== 1) return undefined;
+  const v = [...vars][0]!;
+
+  let a = 0n;
+  let b = 0n;
+  let c = 0n;
+  const terms = side.kind === "sum" ? side.children : [side];
+  for (const t of terms) {
+    const { coeff, body } = coeffAndBody(t);
+    if (body.length === 0) {
+      c += coeff;
+    } else if (body.length === 1) {
+      const part = body[0]!;
+      if (part.kind === "var" && part.name === v) {
+        b += coeff;
+      } else if (
+        part.kind === "pow" &&
+        part.base.kind === "var" &&
+        part.base.name === v &&
+        part.exp.kind === "int" &&
+        part.exp.value === 2n
+      ) {
+        a += coeff;
+      } else {
+        return undefined; // a power other than 2, or a different variable
+      }
+    } else {
+      return undefined; // not a single-variable monomial of degree ≤ 2
+    }
+  }
+  return a === 0n ? undefined : { side, v, a, b, c };
+}
+
+/**
+ * The quadratic formula: `a·x² + b·x + c = 0` branches into
+ * `x = (−b + √D)/(2a)` and `x = (−b − √D)/(2a)`, `D = b² − 4ac`. An exact
+ * equivalence over a field (a ≠ 0) — emits nothing. The √D is left UNSIMPLIFIED
+ * (a literal radical) so `simplify-sqrt` is the natural follow-up; a perfect
+ * square then collapses to rational roots (so this subsumes factoring), and a
+ * negative D leaves √(negative) — an undefined point, i.e. "no real solution".
+ * Gesture: tap an expanded quadratic that equals zero.
+ */
+export const quadraticFormula: BranchingRule<NoParams> = {
+  id: "quadratic-formula",
+  description: "Solve a quadratic a·x² + b·x + c = 0 via x = (−b ± √(b²−4ac)) / 2a.",
+
+  precondition(judgment, location, _params) {
+    return location === judgment.equation.id && readQuadratic(judgment.equation) !== undefined;
+  },
+
+  apply(judgment, location, _params): readonly BranchOutcome[] {
+    const tree = judgment.equation;
+    const r = location === tree.id ? readQuadratic(tree) : undefined;
+    if (r === undefined) {
+      throw new RulePreconditionViolation(this.id, "not an expanded quadratic equal to zero");
+    }
+    const { v, a, b, c } = r;
+    const discriminant = b * b - 4n * a * c;
+    const twoA = rationalToExpr(new Rational(2n * a));
+    const negB = new Rational(-b);
+
+    const branch = (sign: 1n | -1n, label: string): BranchOutcome => {
+      // int(discriminant) is Neg(Int) when D < 0 → √ evaluates undefined.
+      const radical = sign === 1n ? sqrt(int(discriminant)) : neg(sqrt(int(discriminant)));
+      const numerator = b === 0n ? radical : sum([rationalToExpr(negB), radical]);
+      const rhs = fraction([numerator], [twoA]);
+      const eqn: Equation = { ...tree, lhs: variable(v), rhs, relation: "=" };
+      return { label, equation: eqn, emits: [], diff: { ...idSetDiff(tree, eqn), merged: [], moved: [] } };
+    };
+    return [branch(1n, "+ root"), branch(-1n, "− root")];
   },
 };

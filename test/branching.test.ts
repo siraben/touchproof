@@ -13,12 +13,14 @@ import {
   Derivation,
   eq,
   equation,
+  evalExpr,
   int,
   invariantViolations,
   mkJudgment,
   movesFrom,
   pow,
   product,
+  quadraticFormula,
   Rational,
   ruleById,
   simplifySqrt,
@@ -32,6 +34,7 @@ import {
   type Equation,
   type Move,
 } from "../src/index.js";
+import { termFromCoeff } from "../src/rules/splitTerm.js";
 import { arbEnvs, arbExpr } from "./gen.js";
 
 function assertUnionProperty(
@@ -114,6 +117,73 @@ describe("zero-product", () => {
     if (p.kind !== "product") throw new Error("unreachable");
     const eqn = equation(p, int(5));
     expect(zeroProduct.precondition(mkJudgment(eqn), eqn.id, {})).toBe(false);
+  });
+});
+
+describe("quadratic-formula", () => {
+  // a·x² + b·x + c, expanded (integer coefficients), as a side = 0 equation.
+  const quadratic = (a: bigint, b: bigint, c: bigint, v = "x"): Equation => {
+    const terms = [termFromCoeff(a, [pow(variable(v), int(2))])];
+    if (b !== 0n) terms.push(termFromCoeff(b, [variable(v)]));
+    if (c !== 0n) terms.push(termFromCoeff(c, []));
+    return equation(terms.length === 1 ? terms[0]! : sum(terms), int(0));
+  };
+
+  it("property: the ± branches union to the quadratic's solutions", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 3 }),
+        fc.integer({ min: -4, max: 4 }),
+        fc.integer({ min: -4, max: 4 }),
+        (a, r1, r2) => {
+          // Built from known roots r1, r2 → the discriminant is a perfect
+          // square, so completeness (not just vacuous soundness) is exercised.
+          const A = BigInt(a);
+          const B = -A * BigInt(r1 + r2);
+          const C = A * BigInt(r1) * BigInt(r2);
+          const eqn = quadratic(A, B, C);
+          const j = mkJudgment(eqn);
+          expect(quadraticFormula.precondition(j, eqn.id, {})).toBe(true);
+          const branches = applyBranchingRule(j, quadraticFormula, eqn.id, {});
+          expect(branches).toHaveLength(2);
+          for (const b of branches) expect(invariantViolations(b.judgment.equation)).toEqual([]);
+          const envs: Env[] = [r1, r2, r1 + 1, r2 - 1, 0].map(
+            (x) => new Map([["x", Rational.of(x)]]),
+          );
+          assertUnionProperty(eqn, branches, envs);
+        },
+      ),
+    );
+  });
+
+  it("solves 2x² + 5x − 3 = 0 to x = 1/2 and x = −3 (subsumes factoring)", () => {
+    const eqn = quadratic(2n, 5n, -3n);
+    const branches = applyBranchingRule(mkJudgment(eqn), quadraticFormula, eqn.id, {});
+    const roots = branches.map((b) => evalExpr(b.judgment.equation.rhs, new Map()).asRational()!);
+    // Each computed root is exact and actually satisfies the original.
+    for (const root of roots) {
+      expect(truthValue(eqn, new Map([["x", root]]))).toBe(true);
+    }
+    expect(roots.map((r) => r.toString()).sort()).toEqual(["-3", "1/2"].sort());
+  });
+
+  it("reports no real solution for a negative discriminant (x² + 1 = 0)", () => {
+    const eqn = quadratic(1n, 0n, 1n);
+    const j = mkJudgment(eqn);
+    expect(quadraticFormula.precondition(j, eqn.id, {})).toBe(true);
+    const branches = applyBranchingRule(j, quadraticFormula, eqn.id, {});
+    // √(−4) is an undefined point — no real value at any rational x.
+    for (const b of branches) {
+      expect(truthValue(b.judgment.equation, new Map([["x", Rational.of(0)]]))).toBeUndefined();
+    }
+  });
+
+  it("is offered as a branching tap on an expanded quadratic = 0", () => {
+    const eqn = quadratic(1n, -5n, 6n);
+    const d = new Derivation(eqn);
+    const m = movesFrom(d.current, eqn.lhs.id).find((mv) => mv.ruleId === "quadratic-formula");
+    expect(m, "no quadratic-formula move offered").toBeDefined();
+    expect(m!.branching).toBe(true);
   });
 });
 
