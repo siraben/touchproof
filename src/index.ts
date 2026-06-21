@@ -223,6 +223,13 @@ export type { Move, AnyRule, AnyBranchingRule } from "./moves.js";
 // — distinct from exprToString, which round-trips through the parser.
 export { describeMove, describeExpr } from "./describe.js";
 
+// Systems — the conjunctive multi-equation state (shared assumptions, every
+// equation a constraint). Reuses single-equation rules via an equation index;
+// cross-equation rules (substitution, elimination) build on this. See
+// docs/multi-equation.md.
+export { mkSystem, applyRuleInSystem, systemTruth, enumerateSystemMoves } from "./system.js";
+export type { System, SystemMove } from "./system.js";
+
 // ---------------------------------------------------------------------------
 // 9. Layout geometry — DOM-free rendering support
 // ---------------------------------------------------------------------------
