@@ -1,7 +1,7 @@
 "use client";
 
 import type { ProgramExpr, ProofMove, ProofSession } from "@touchproof/core";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { dropMove, movesForHandle, proofProgress } from "@/lib/viewModel";
 
 type ApiState = { session: ProofSession; moves: ProofMove[] };
@@ -80,13 +80,67 @@ export function ProofWorkspace() {
   const [view, setView] = useState<View>("visual");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const importInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch("/api/proof").then(async (response) => {
+    const saved = window.localStorage.getItem("touchproof:map-comp:v1");
+    const request = saved === null
+      ? fetch("/api/proof")
+      : fetch("/api/proof", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ session: JSON.parse(saved) as unknown, inspect: true }),
+        });
+    request.then(async (response) => {
       if (!response.ok) throw new Error("Could not start the proof session.");
       return response.json() as Promise<ApiState>;
     }).then(setState).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not start TouchProof."));
   }, []);
+
+  useEffect(() => {
+    if (state !== undefined) window.localStorage.setItem("touchproof:map-comp:v1", JSON.stringify(state.session));
+  }, [state]);
+
+  const reset = async () => {
+    setBusy(true);
+    try {
+      window.localStorage.removeItem("touchproof:map-comp:v1");
+      const response = await fetch("/api/proof");
+      setState(await response.json() as ApiState);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportDocument = () => {
+    if (state === undefined) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(state.session, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "map-comp.touchproof.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importDocument = async (file: File) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const session = JSON.parse(await file.text()) as unknown;
+      const response = await fetch("/api/proof", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ session, inspect: true }),
+      });
+      const result = await response.json() as ApiState & { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "The proof document was rejected.");
+      setState(result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The proof document was rejected.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const send = async (payload: { moveId?: string; focusGoalId?: string }) => {
     if (state === undefined || busy) return;
@@ -124,8 +178,18 @@ export function ProofWorkspace() {
           <button className={view === "visual" ? "active" : ""} onClick={() => setView("visual")}>Visual</button>
           <button className={view === "notebook" ? "active" : ""} onClick={() => setView("notebook")}>Notebook</button>
         </div>
-        <div className={`kernel-badge ${state.session.kernelStatus}`}>
-          <span />{state.session.kernelStatus === "checked" ? "Kernel checked" : "Checking each move"}
+        <div className="header-actions">
+          <button onClick={exportDocument}>Export</button>
+          <button onClick={() => importInput.current?.click()}>Import</button>
+          <button onClick={() => void reset()}>Reset</button>
+          <input ref={importInput} hidden type="file" accept="application/json,.json" onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file !== undefined) void importDocument(file);
+            event.target.value = "";
+          }} />
+          <div className={`kernel-badge ${state.session.kernelStatus}`}>
+            <span />{state.session.kernelStatus === "checked" ? "Kernel checked" : "Checking each move"}
+          </div>
         </div>
       </header>
 

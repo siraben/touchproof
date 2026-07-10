@@ -26,6 +26,9 @@ button { font: inherit; }
 .kernel-badge span { width: 8px; height: 8px; border-radius: 50%; background: #e0a54c; box-shadow: 0 0 0 4px #f7ead4; }
 .kernel-badge.checked { color: var(--green); font-weight: 700; }
 .kernel-badge.checked span { background: #32a875; box-shadow: 0 0 0 4px #d8f4e7; }
+.header-actions { justify-self: end; display: flex; align-items: center; gap: 7px; }
+.header-actions > button { border: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; padding: 6px; }
+.header-actions > button:hover { color: var(--green); }
 .lesson-strip { display: grid; grid-template-columns: 1.3fr 1fr auto; gap: 40px; align-items: end; padding: 30px 40px 26px; border-bottom: 1px solid var(--line); }
 .eyebrow { color: var(--coral); text-transform: uppercase; letter-spacing: .1em; font-size: 11px; font-weight: 800; }
 h1 { margin: 5px 0 0; font: 700 32px/1.1 Georgia, serif; letter-spacing: -.025em; }
@@ -95,7 +98,8 @@ h1 { margin: 5px 0 0; font: 700 32px/1.1 Georgia, serif; letter-spacing: -.025em
 @media (max-width: 800px) {
   .topbar { grid-template-columns: 1fr auto; padding: 0 16px; }
   .view-switch { order: 3; position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 30; box-shadow: var(--shadow); }
-  .kernel-badge { font-size: 0; }
+  .kernel-badge, .header-actions > button { font-size: 0; }
+  .header-actions > button { width: 7px; height: 7px; padding: 0; border-radius: 50%; background: #b7bdb8; }
   .brand small { display: none; }
   .lesson-strip { grid-template-columns: 1fr auto; padding: 22px 18px; }
   .lesson-strip p { display: none; }

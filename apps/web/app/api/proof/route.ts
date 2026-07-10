@@ -13,6 +13,22 @@ function response(session: ProofSession) {
   return NextResponse.json({ session, moves: enumerateProofMoves(session) });
 }
 
+function isProofSession(value: unknown): value is ProofSession {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<ProofSession>;
+  return typeof candidate.theorem === "string"
+    && typeof candidate.statement === "string"
+    && typeof candidate.focusedGoalId === "string"
+    && (candidate.kernelStatus === "pending" || candidate.kernelStatus === "checked")
+    && Array.isArray(candidate.goals)
+    && candidate.goals.length > 0
+    && candidate.goals.length <= 8
+    && candidate.goals.every((goal) => typeof goal === "object" && goal !== null
+      && typeof goal.id === "string" && (goal.status === "open" || goal.status === "solved")
+      && typeof goal.left === "object" && goal.left !== null
+      && typeof goal.right === "object" && goal.right !== null);
+}
+
 export async function GET() {
   return response(createMapCompositionSession());
 }
@@ -23,10 +39,13 @@ export async function POST(request: Request) {
       session?: ProofSession;
       moveId?: string;
       focusGoalId?: string;
+      inspect?: boolean;
     };
-    if (body.session === undefined) throw new Error("missing proof session");
+    if (!isProofSession(body.session)) throw new Error("invalid proof document");
+    if (JSON.stringify(body.session).length > 200_000) throw new Error("proof document is too large");
     if (body.moveId !== undefined) return response(applyProofMove(body.session, body.moveId));
     if (body.focusGoalId !== undefined) return response(focusGoal(body.session, body.focusGoalId));
+    if (body.inspect === true) return response(body.session);
     throw new Error("missing proof action");
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid proof request";
