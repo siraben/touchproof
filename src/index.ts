@@ -1,6 +1,7 @@
 /**
- * wyrm-math — an exact, conditionally-sound symbolic algebra engine for
- * manipulative interfaces.
+ * TouchProof — a visual-first equational reasoning and theorem-proving
+ * engine. The legacy Wyrm algebra exports remain temporarily available
+ * while the fork migrates its rendering primitives.
  *
  * This file IS the public API: every export below is supported surface,
  * grouped by concern. Anything not re-exported here is an internal detail.
@@ -21,6 +22,34 @@
  * illegal moves are impossible, and every reachable state is equivalent to
  * the original equation GIVEN its assumption set.
  */
+
+// TouchProof dependent kernel and first visual proof certificate.
+export * from "./kernel/term.js";
+export * from "./kernel/checker.js";
+export {
+  touchProofEnvironment,
+  mapCompositionProof,
+  verifyMapCompositionProof,
+} from "./proof/standardLibrary.js";
+export {
+  programVar,
+  ctor as programConstructor,
+  call as programCall,
+  exprToText as programExprToText,
+  equationToText,
+  createMapCompositionSession,
+  enumerateProofMoves,
+  applyProofMove,
+  focusGoal,
+} from "./proof/session.js";
+export type {
+  Expr as ProgramExpr,
+  Hypothesis as ProofHypothesis,
+  EquationGoal,
+  ProofStep,
+  ProofSession,
+  ProofMove,
+} from "./proof/session.js";
 
 // ---------------------------------------------------------------------------
 // 1. Expression trees
