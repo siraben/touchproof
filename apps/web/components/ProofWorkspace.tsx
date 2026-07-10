@@ -35,6 +35,11 @@ function Expression({
     if (expression.name === "apply" && expression.args.length === 2) {
       return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="paren">(</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
     }
+    if (expression.name === "map" && expression.args.length === 2) {
+      const value = expression.args[1]!;
+      const needsParens = value.kind === "call" || (value.kind === "ctor" && value.name !== "nil");
+      return <><span className="function-name">map</span><span className="argument"><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /></span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
+    }
     return <><span className="function-name">{expression.name}</span>{expression.args.map((arg) => <span className="argument" key={arg.id}><Expression expression={arg} moves={moves} onMove={onMove} /></span>)}</>;
   })();
 

@@ -36,6 +36,7 @@ describe("visual proof session", () => {
   it("offers only induction before an unknown list can reduce", () => {
     const session = createMapCompositionSession();
     expect(enumerateProofMoves(session).map((move) => move.kind)).toEqual(["induction"]);
+    expect(equationToText(session.goals[0]!)).toBe("map (f ∘ g) l = map f (map g l)");
   });
 
   it("proves map composition through local obligations", () => {
@@ -43,6 +44,8 @@ describe("visual proof session", () => {
     session = applyFirst(session, (id) => id === "induction:l");
     expect(session.goals.map((goal) => goal.label)).toEqual(["empty list", "x :: xs"]);
     expect(session.focusedGoalId).toBe("goal-nil");
+    expect(equationToText(session.goals[1]!)).toContain("map (f ∘ g) (x :: xs)");
+    expect(equationToText(session.goals[1]!)).toContain("map f (map g (x :: xs))");
 
     session = reduceUntilReflexive(session);
     expect(session.goals[0]?.status).toBe("solved");

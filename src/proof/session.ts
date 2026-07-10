@@ -77,6 +77,15 @@ export function exprToText(expr: Expr): string {
   if (expr.name === "apply" && expr.args.length === 2) {
     return `${exprToText(expr.args[0]!)} (${exprToText(expr.args[1]!)})`;
   }
+  if (expr.name === "map" && expr.args.length === 2) {
+    const fn = expr.args[0]!;
+    const value = expr.args[1]!;
+    const valueText = exprToText(value);
+    const renderedValue = value.kind === "var" || (value.kind === "ctor" && value.name === "nil")
+      ? valueText
+      : `(${valueText})`;
+    return `map ${exprToText(fn)} ${renderedValue}`;
+  }
   return `${expr.name} ${expr.args.map((arg) => {
     const text = exprToText(arg);
     return arg.kind === "call" && arg.name !== "compose" ? `(${text})` : text;
