@@ -1,4 +1,4 @@
-import { verifyMapCompositionProof } from "./standardLibrary.js";
+import { verifyLessonProof } from "./standardLibrary.js";
 
 export type Expr =
   | { readonly id: string; readonly kind: "var"; readonly name: string }
@@ -39,8 +39,14 @@ export interface ProofStep {
 }
 
 export interface ProofSession {
+  readonly lessonId: string;
   readonly theorem: string;
   readonly statement: string;
+  readonly analysis?: {
+    readonly kind: "cases" | "induction";
+    readonly variable: string;
+    readonly type: "Bool" | "Nat" | "List";
+  };
   readonly goals: readonly EquationGoal[];
   readonly focusedGoalId: string;
   readonly kernelStatus: "pending" | "checked";
@@ -48,7 +54,7 @@ export interface ProofSession {
 
 export interface ProofMove {
   readonly id: string;
-  readonly kind: "reduce" | "induction" | "rewrite" | "close";
+  readonly kind: "reduce" | "cases" | "induction" | "rewrite" | "close";
   readonly label: string;
   readonly explanation: string;
   readonly handle: string;
@@ -58,6 +64,100 @@ export interface ProofMove {
   readonly hypothesisId?: string;
 }
 
+export interface Lesson {
+  readonly id: string;
+  readonly chapter: string;
+  readonly title: string;
+  readonly concept: string;
+  readonly theorem: string;
+  readonly source: string;
+  readonly sourceUrl: string;
+}
+
+export const lessonCatalog: readonly Lesson[] = [
+  {
+    id: "bool-compute",
+    chapter: "1 · Booleans",
+    title: "Evaluate negation",
+    concept: "Definitions compute",
+    theorem: "negb false = true",
+    source: "Adapted from Software Foundations, Logical Foundations: Basics",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Basics.html",
+  },
+  {
+    id: "bool-involution",
+    chapter: "2 · Booleans",
+    title: "Negating twice",
+    concept: "Boolean elimination",
+    theorem: "negb (negb b) = b",
+    source: "Adapted from Software Foundations, Logical Foundations: Basics",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Basics.html",
+  },
+  {
+    id: "nat-add-example",
+    chapter: "3 · Natural numbers",
+    title: "Evaluate addition",
+    concept: "Recursive computation",
+    theorem: "2 + 1 = 3",
+    source: "Adapted from Software Foundations, Logical Foundations: Basics",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Basics.html",
+  },
+  {
+    id: "nat-add-zero",
+    chapter: "4 · Natural numbers",
+    title: "Adding zero on the right",
+    concept: "Induction on Nat",
+    theorem: "n + 0 = n",
+    source: "Adapted from Software Foundations, Logical Foundations: Induction",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html",
+  },
+  {
+    id: "list-append-nil",
+    chapter: "5 · Lists",
+    title: "Appending the empty list",
+    concept: "Induction on List",
+    theorem: "xs ++ [] = xs",
+    source: "Adapted from Software Foundations, Logical Foundations: Lists",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html",
+  },
+  {
+    id: "list-map-append",
+    chapter: "6 · Lists",
+    title: "Map distributes over append",
+    concept: "Induction with parameters",
+    theorem: "map f (xs ++ ys) = map f xs ++ map f ys",
+    source: "Adapted from Software Foundations, Logical Foundations: Poly",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html",
+  },
+  {
+    id: "list-rev-append",
+    chapter: "7 · Lists",
+    title: "Reverse an append",
+    concept: "Reuse associativity",
+    theorem: "rev (xs ++ ys) = rev ys ++ rev xs",
+    source: "Adapted from Software Foundations, Logical Foundations: Lists",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html",
+  },
+  {
+    id: "list-rev-involution",
+    chapter: "8 · Lists",
+    title: "Reversing twice",
+    concept: "Reuse a proved theorem",
+    theorem: "rev (rev xs) = xs",
+    source: "Adapted from Software Foundations, Logical Foundations: Lists",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html",
+  },
+  {
+    id: "map-composition",
+    chapter: "9 · Higher-order functions",
+    title: "Map preserves composition",
+    concept: "Induction and local rewriting",
+    theorem: "map (f ∘ g) l = map f (map g l)",
+    source: "Inspired by Software Foundations, Logical Foundations: Poly",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html",
+  },
+] as const;
+
 const compose = (f: Expr, g: Expr): Expr => call("compose", [f, g]);
 const map = (f: Expr, value: Expr): Expr => call("map", [f, value]);
 const apply = (fn: Expr, value: Expr): Expr => call("apply", [fn, value]);
@@ -66,6 +166,8 @@ export function exprToText(expr: Expr): string {
   if (expr.kind === "var") return expr.name;
   if (expr.kind === "ctor") {
     if (expr.name === "nil") return "[]";
+    if (expr.name === "zero") return "0";
+    if (expr.name === "succ" && expr.args.length === 1) return `S (${exprToText(expr.args[0]!)})`;
     if (expr.name === "cons" && expr.args.length === 2) {
       return `${exprToText(expr.args[0]!)} :: ${exprToText(expr.args[1]!)}`;
     }
@@ -85,6 +187,22 @@ export function exprToText(expr: Expr): string {
       ? valueText
       : `(${valueText})`;
     return `map ${exprToText(fn)} ${renderedValue}`;
+  }
+  if (expr.name === "negb" && expr.args.length === 1) {
+    const value = expr.args[0]!;
+    const text = exprToText(value);
+    return `negb ${value.kind === "var" || value.kind === "ctor" ? text : `(${text})`}`;
+  }
+  if (expr.name === "add" && expr.args.length === 2) {
+    return `${exprToText(expr.args[0]!)} + ${exprToText(expr.args[1]!)}`;
+  }
+  if (expr.name === "append" && expr.args.length === 2) {
+    return `${exprToText(expr.args[0]!)} ++ ${exprToText(expr.args[1]!)}`;
+  }
+  if (expr.name === "rev" && expr.args.length === 1) {
+    const value = expr.args[0]!;
+    const text = exprToText(value);
+    return `rev ${value.kind === "var" || (value.kind === "ctor" && value.name === "nil") ? text : `(${text})`}`;
   }
   return `${expr.name} ${expr.args.map((arg) => {
     const text = exprToText(arg);
@@ -132,6 +250,35 @@ function allExpressions(expr: Expr): Expr[] {
 
 function reduce(expr: Expr): Expr | undefined {
   if (expr.kind !== "call") return undefined;
+  if (expr.name === "negb" && expr.args.length === 1) {
+    const value = expr.args[0];
+    if (value?.kind === "ctor" && value.name === "true") return ctor("false", [], expr.id);
+    if (value?.kind === "ctor" && value.name === "false") return ctor("true", [], expr.id);
+  }
+  if (expr.name === "add" && expr.args.length === 2) {
+    const [left, right] = expr.args;
+    if (left?.kind === "ctor" && left.name === "zero" && right !== undefined) return { ...cloneFresh(right), id: expr.id };
+    if (left?.kind === "ctor" && left.name === "succ" && left.args.length === 1 && right !== undefined) {
+      return ctor("succ", [call("add", [cloneFresh(left.args[0]!), cloneFresh(right)])], expr.id);
+    }
+  }
+  if (expr.name === "append" && expr.args.length === 2) {
+    const [left, right] = expr.args;
+    if (left?.kind === "ctor" && left.name === "nil" && right !== undefined) return { ...cloneFresh(right), id: expr.id };
+    if (left?.kind === "ctor" && left.name === "cons" && left.args.length === 2 && right !== undefined) {
+      return ctor("cons", [cloneFresh(left.args[0]!), call("append", [cloneFresh(left.args[1]!), cloneFresh(right)])], expr.id);
+    }
+  }
+  if (expr.name === "rev" && expr.args.length === 1) {
+    const value = expr.args[0];
+    if (value?.kind === "ctor" && value.name === "nil") return ctor("nil", [], expr.id);
+    if (value?.kind === "ctor" && value.name === "cons" && value.args.length === 2) {
+      return call("append", [
+        call("rev", [cloneFresh(value.args[1]!)]),
+        ctor("cons", [cloneFresh(value.args[0]!), ctor("nil")]),
+      ], expr.id);
+    }
+  }
   if (expr.name === "map" && expr.args.length === 2) {
     const [fn, list] = expr.args;
     if (fn === undefined || list === undefined) return undefined;
@@ -172,28 +319,164 @@ export function createMapCompositionSession(): ProofSession {
     steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: "theorem statement" }],
   };
   return {
+    lessonId: "map-composition",
     theorem: "map_comp",
     statement: "map (f ∘ g) l = map f (map g l)",
+    analysis: { kind: "induction", variable: "l", type: "List" },
     goals: [goal],
     focusedGoalId: goal.id,
     kernelStatus: "pending",
   };
 }
 
+function rootSession(
+  lessonId: string,
+  theorem: string,
+  statement: string,
+  context: readonly string[],
+  left: Expr,
+  right: Expr,
+  analysis?: NonNullable<ProofSession["analysis"]>,
+): ProofSession {
+  const goal: EquationGoal = {
+    id: "goal-root",
+    label: lessonCatalog.find((lesson) => lesson.id === lessonId)?.title ?? theorem,
+    context,
+    hypotheses: [],
+    left,
+    right,
+    status: "open",
+    steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: "theorem statement" }],
+  };
+  return {
+    lessonId,
+    theorem,
+    statement,
+    ...(analysis === undefined ? {} : { analysis }),
+    goals: [goal],
+    focusedGoalId: goal.id,
+    kernelStatus: "pending",
+  };
+}
+
+export function createLessonSession(lessonId: string): ProofSession {
+  if (lessonId === "map-composition") return createMapCompositionSession();
+  if (lessonId === "bool-compute") {
+    return rootSession(
+      lessonId,
+      "negb_false",
+      "negb false = true",
+      [],
+      call("negb", [ctor("false")]),
+      ctor("true"),
+    );
+  }
+  if (lessonId === "bool-involution") {
+    const b = programVar("b", "var-b");
+    return rootSession(
+      lessonId,
+      "negb_involutive",
+      "negb (negb b) = b",
+      ["b : Bool"],
+      call("negb", [call("negb", [b])]),
+      programVar("b"),
+      { kind: "cases", variable: "b", type: "Bool" },
+    );
+  }
+  if (lessonId === "nat-add-zero") {
+    const n = programVar("n", "var-n");
+    return rootSession(
+      lessonId,
+      "add_zero_right",
+      "n + 0 = n",
+      ["n : Nat"],
+      call("add", [n, ctor("zero")]),
+      programVar("n"),
+      { kind: "induction", variable: "n", type: "Nat" },
+    );
+  }
+  if (lessonId === "nat-add-example") {
+    const zero = ctor("zero");
+    const one = ctor("succ", [zero]);
+    const two = ctor("succ", [ctor("succ", [ctor("zero")])]);
+    const three = ctor("succ", [ctor("succ", [ctor("succ", [ctor("zero")])])]);
+    return rootSession(
+      lessonId,
+      "two_plus_one",
+      "2 + 1 = 3",
+      [],
+      call("add", [two, one]),
+      three,
+    );
+  }
+  if (lessonId === "list-append-nil") {
+    const xs = programVar("xs", "var-xs");
+    return rootSession(
+      lessonId,
+      "append_nil_right",
+      "xs ++ [] = xs",
+      ["A : Type", "xs : List A"],
+      call("append", [xs, ctor("nil")]),
+      programVar("xs"),
+      { kind: "induction", variable: "xs", type: "List" },
+    );
+  }
+  if (lessonId === "list-map-append") {
+    return rootSession(
+      lessonId,
+      "map_append",
+      "map f (xs ++ ys) = map f xs ++ map f ys",
+      ["A, B : Type", "f : A → B", "xs : List A", "ys : List A"],
+      call("map", [programVar("f", "var-f"), call("append", [programVar("xs", "var-xs"), programVar("ys", "var-ys")])]),
+      call("append", [call("map", [programVar("f"), programVar("xs")]), call("map", [programVar("f"), programVar("ys")])]),
+      { kind: "induction", variable: "xs", type: "List" },
+    );
+  }
+  if (lessonId === "list-rev-append") {
+    return rootSession(
+      lessonId,
+      "rev_append",
+      "rev (xs ++ ys) = rev ys ++ rev xs",
+      ["A : Type", "xs : List A", "ys : List A"],
+      call("rev", [call("append", [programVar("xs", "var-xs"), programVar("ys", "var-ys")])]),
+      call("append", [call("rev", [programVar("ys")]), call("rev", [programVar("xs")])]),
+      { kind: "induction", variable: "xs", type: "List" },
+    );
+  }
+  if (lessonId === "list-rev-involution") {
+    return rootSession(
+      lessonId,
+      "rev_involutive",
+      "rev (rev xs) = xs",
+      ["A : Type", "xs : List A"],
+      call("rev", [call("rev", [programVar("xs", "var-xs")])]),
+      programVar("xs"),
+      { kind: "induction", variable: "xs", type: "List" },
+    );
+  }
+  throw new Error(`unknown lesson ${lessonId}`);
+}
+
 export function enumerateProofMoves(session: ProofSession): ProofMove[] {
   const goal = focusedGoal(session);
   if (goal.status === "solved") return [];
   const moves: ProofMove[] = [];
-  if (goal.id === "goal-root") {
-    const listVariable = allExpressions(goal.left).find((expr) => expr.kind === "var" && expr.name === "l");
-    if (listVariable !== undefined) {
+  if (goal.id === "goal-root" && session.analysis !== undefined) {
+    const analyzedVariable = allExpressions(goal.left).find(
+      (expr) => expr.kind === "var" && expr.name === session.analysis?.variable,
+    );
+    if (analyzedVariable !== undefined) {
       moves.push({
-        id: "induction:l",
-        kind: "induction",
-        label: "Induct on l",
-        explanation: "A list is either [] or x :: xs; the recursive case may reuse the claim for xs.",
-        handle: listVariable.id,
-        dropTarget: "induction-zone",
+        id: `${session.analysis.kind}:${session.analysis.variable}`,
+        kind: session.analysis.kind,
+        label: session.analysis.kind === "cases"
+          ? `Analyze ${session.analysis.variable}`
+          : `Induct on ${session.analysis.variable}`,
+        explanation: session.analysis.kind === "cases"
+          ? `Consider every constructor of ${session.analysis.type}.`
+          : `Consider every constructor of ${session.analysis.type} and reuse the claim for recursive fields.`,
+        handle: analyzedVariable.id,
+        dropTarget: "analysis-zone",
       });
     }
   }
@@ -252,33 +535,85 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
   if (move === undefined) throw new Error(`illegal proof move: ${moveId}`);
   const goal = focusedGoal(session);
 
-  if (move.kind === "induction") {
-    const nil = ctor("nil");
-    const x = programVar("x");
-    const xs = programVar("xs");
-    const cons = ctor("cons", [x, xs]);
-    const nilLeft = replaceVariable(goal.left, "l", nil);
-    const nilRight = replaceVariable(goal.right, "l", nil);
-    const consLeft = replaceVariable(goal.left, "l", cons);
-    const consRight = replaceVariable(goal.right, "l", cons);
-    const ihLeft = replaceVariable(goal.left, "l", xs);
-    const ihRight = replaceVariable(goal.right, "l", xs);
-    const nilGoal: EquationGoal = {
-      id: "goal-nil",
-      label: "empty list",
-      context: goal.context.filter((entry) => !entry.startsWith("l :")),
-      hypotheses: [], left: nilLeft, right: nilRight, status: "open",
-      steps: [{ equation: `${exprToText(nilLeft)} = ${exprToText(nilRight)}`, reason: "empty-list obligation" }],
-    };
-    const consGoal: EquationGoal = {
-      id: "goal-cons",
-      label: "x :: xs",
-      context: [...goal.context.filter((entry) => !entry.startsWith("l :")), "x : A", "xs : List A"],
-      hypotheses: [{ id: "ih-xs", name: "IH", left: ihLeft, right: ihRight }],
-      left: consLeft, right: consRight, status: "open",
-      steps: [{ equation: `${exprToText(consLeft)} = ${exprToText(consRight)}`, reason: "constructor obligation" }],
-    };
-    return { ...session, goals: [nilGoal, consGoal], focusedGoalId: nilGoal.id };
+  if ((move.kind === "induction" || move.kind === "cases") && session.analysis !== undefined) {
+    const { variable: name, type: analyzedType } = session.analysis;
+    const baseContext = goal.context.filter((entry) => !entry.startsWith(`${name} :`));
+    const constructors: Array<{
+      label: string;
+      value: Expr;
+      context: readonly string[];
+      recursive?: Expr;
+    }> = analyzedType === "Bool"
+      ? [
+          { label: "true", value: ctor("true"), context: baseContext },
+          { label: "false", value: ctor("false"), context: baseContext },
+        ]
+      : analyzedType === "Nat"
+        ? [
+            { label: "zero", value: ctor("zero"), context: baseContext },
+            { label: "succ n", value: ctor("succ", [programVar("n")]), context: [...baseContext, "n : Nat"], recursive: programVar("n") },
+          ]
+        : [
+            { label: "empty list", value: ctor("nil"), context: baseContext },
+            { label: "x :: xs", value: ctor("cons", [programVar("x"), programVar("xs")]), context: [...baseContext, "x : A", "xs : List A"], recursive: programVar("xs") },
+          ];
+    let obligations = constructors.map((branch, index): EquationGoal => {
+      const left = replaceVariable(goal.left, name, branch.value);
+      const right = replaceVariable(goal.right, name, branch.value);
+      const hypotheses = branch.recursive === undefined || move.kind === "cases"
+        ? []
+        : [{
+            id: `ih-${branch.recursive.name}`,
+            name: "IH",
+            left: replaceVariable(goal.left, name, branch.recursive),
+            right: replaceVariable(goal.right, name, branch.recursive),
+          }];
+      return {
+        id: `goal-${index}`,
+        label: branch.label,
+        context: branch.context,
+        hypotheses,
+        left,
+        right,
+        status: "open",
+        steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: `${branch.label} obligation` }],
+      };
+    });
+    if (session.lessonId === "list-rev-append") {
+      obligations = obligations.map((obligation, index) => {
+        const revYs = call("rev", [programVar("ys")]);
+        if (index === 0) {
+          return { ...obligation, hypotheses: [...obligation.hypotheses, {
+            id: "lemma-append-nil",
+            name: "append_nil",
+            left: call("append", [revYs, ctor("nil")]),
+            right: cloneFresh(revYs),
+          }] };
+        }
+        const revXs = call("rev", [programVar("xs")]);
+        const singleton = ctor("cons", [programVar("x"), ctor("nil")]);
+        return { ...obligation, hypotheses: [...obligation.hypotheses, {
+          id: "lemma-append-assoc",
+          name: "append_assoc",
+          left: call("append", [call("append", [revYs, revXs]), singleton]),
+          right: call("append", [cloneFresh(revYs), call("append", [cloneFresh(revXs), cloneFresh(singleton)])]),
+        }] };
+      });
+    }
+    if (session.lessonId === "list-rev-involution") {
+      obligations = obligations.map((obligation, index) => {
+        if (index === 0) return obligation;
+        const xs = programVar("xs");
+        const singleton = ctor("cons", [programVar("x"), ctor("nil")]);
+        return { ...obligation, hypotheses: [...obligation.hypotheses, {
+          id: "lemma-rev-append",
+          name: "rev_append",
+          left: call("rev", [call("append", [call("rev", [xs]), singleton])]),
+          right: call("append", [call("rev", [cloneFresh(singleton)]), call("rev", [call("rev", [cloneFresh(xs)])])]),
+        }] };
+      });
+    }
+    return { ...session, goals: obligations, focusedGoalId: obligations[0]!.id };
   }
 
   if (move.kind === "reduce" && move.side !== undefined && move.targetId !== undefined) {
@@ -315,7 +650,7 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
     const updated = updateGoal(session, solved);
     const nextOpen = updated.goals.find((candidate) => candidate.status === "open");
     if (nextOpen !== undefined) return { ...updated, focusedGoalId: nextOpen.id };
-    verifyMapCompositionProof();
+    verifyLessonProof(session.lessonId);
     return { ...updated, kernelStatus: "checked" };
   }
 

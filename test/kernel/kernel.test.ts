@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { check, definitionallyEqual, infer, KernelError, normalize } from "../../src/kernel/checker.js";
 import { app, arrow, equal, lambda, refl, subst, type, variable } from "../../src/kernel/term.js";
-import { mapCompositionProof, touchProofEnvironment, verifyMapCompositionProof } from "../../src/proof/standardLibrary.js";
+import {
+  addZeroRightProof,
+  appendNilRightProof,
+  booleanComputationProof,
+  booleanInvolutionProof,
+  mapCompositionProof,
+  mapAppendProof,
+  natAdditionExampleProof,
+  revAppendProof,
+  revInvolutionProof,
+  touchProofEnvironment,
+  verifyLessonProof,
+  verifyMapCompositionProof,
+} from "../../src/proof/standardLibrary.js";
 
 describe("dependent kernel", () => {
   it("checks dependent functions and beta equality", () => {
@@ -30,6 +43,21 @@ describe("dependent kernel", () => {
     const theorem = mapCompositionProof();
     expect(() => check(theorem.term, theorem.type, new Map(), touchProofEnvironment())).not.toThrow();
     expect(() => verifyMapCompositionProof()).not.toThrow();
+  });
+
+  it.each([
+    ["bool-compute", booleanComputationProof],
+    ["bool-involution", booleanInvolutionProof],
+    ["nat-add-example", natAdditionExampleProof],
+    ["nat-add-zero", addZeroRightProof],
+    ["list-append-nil", appendNilRightProof],
+    ["list-map-append", mapAppendProof],
+    ["list-rev-append", revAppendProof],
+    ["list-rev-involution", revInvolutionProof],
+  ] as const)("checks the %s curriculum certificate", (lessonId, build) => {
+    const theorem = build();
+    expect(() => check(theorem.term, theorem.type, new Map(), touchProofEnvironment())).not.toThrow();
+    expect(() => verifyLessonProof(lessonId)).not.toThrow();
   });
 
   it("does not accept reflexivity for unequal terms", () => {

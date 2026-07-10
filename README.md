@@ -13,7 +13,9 @@ a matching expression. A synchronized notebook view records the same proof as
 readable equations. Every committed step is validated by a small dependent
 type kernel.
 
-The first end-to-end lesson proves map composition:
+The learning path begins with concrete Boolean and Nat evaluation, then
+introduces Boolean elimination, induction on naturals, and a sequence of list
+laws. Its capstone proves map composition:
 
 ```text
 map (f ∘ g) l = map f (map g l)
@@ -57,6 +59,8 @@ nix develop --command zsh -lc '
   local proof-document persistence.
 - `docs/WYRM_ARCHITECTURE.md`: the original Wyrm Math architecture retained
   as design provenance.
+- `docs/CURRICULUM.md`: the Software Foundations-inspired lesson sequence and
+  the capability exercised by every theorem.
 
 TouchProof is MIT licensed. The upstream copyright and full Git history are
 preserved.

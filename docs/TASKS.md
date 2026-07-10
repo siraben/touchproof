@@ -15,6 +15,9 @@
 - [x] Add keyboard/button equivalents for proof gestures.
 - [x] Add local persistence plus validated JSON import/export.
 - [x] Test the complete map-composition flow through the TypeScript API.
+- [x] Add the Software Foundations-inspired ramp through Boolean computation,
+      Boolean elimination, Nat computation and induction, append, map/append,
+      reverse/append, reverse involution, and map composition.
 
 ## Kernel expansion
 
@@ -33,7 +36,7 @@
 - [ ] Add reverse rewriting, congruence selection, cases, constructor, and
       hypothesis-introduction gestures.
 - [ ] Add undo/redo over the append-only derivation tree.
-- [ ] Add the introductory Bool, Nat, recursion, and List curriculum before the
-      map-composition lesson.
+- [ ] Add definition-building exercises for `nandb`, `andb3`, `hd_error`, and
+      user-authored recursive functions.
 - [ ] Add browser-level drag/drop and accessibility tests when a browser runner
       is available in CI.

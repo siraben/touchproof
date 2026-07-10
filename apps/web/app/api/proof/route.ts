@@ -1,8 +1,9 @@
 import {
   applyProofMove,
-  createMapCompositionSession,
+  createLessonSession,
   enumerateProofMoves,
   focusGoal,
+  lessonCatalog,
   type ProofSession,
 } from "@touchproof/core";
 import { NextResponse } from "next/server";
@@ -10,13 +11,15 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 function response(session: ProofSession) {
-  return NextResponse.json({ session, moves: enumerateProofMoves(session) });
+  return NextResponse.json({ session, moves: enumerateProofMoves(session), lessons: lessonCatalog });
 }
 
 function isProofSession(value: unknown): value is ProofSession {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<ProofSession>;
-  return typeof candidate.theorem === "string"
+  return typeof candidate.lessonId === "string"
+    && lessonCatalog.some((lesson) => lesson.id === candidate.lessonId)
+    && typeof candidate.theorem === "string"
     && typeof candidate.statement === "string"
     && typeof candidate.focusedGoalId === "string"
     && (candidate.kernelStatus === "pending" || candidate.kernelStatus === "checked")
@@ -29,8 +32,10 @@ function isProofSession(value: unknown): value is ProofSession {
       && typeof goal.right === "object" && goal.right !== null);
 }
 
-export async function GET() {
-  return response(createMapCompositionSession());
+export async function GET(request: Request) {
+  const requested = new URL(request.url).searchParams.get("lesson") ?? lessonCatalog[0]!.id;
+  const lessonId = lessonCatalog.some((lesson) => lesson.id === requested) ? requested : lessonCatalog[0]!.id;
+  return response(createLessonSession(lessonId));
 }
 
 export async function POST(request: Request) {

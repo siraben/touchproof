@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyProofMove,
+  createLessonSession,
   createMapCompositionSession,
   enumerateProofMoves,
   equationToText,
@@ -43,18 +44,38 @@ describe("visual proof session", () => {
     let session = createMapCompositionSession();
     session = applyFirst(session, (id) => id === "induction:l");
     expect(session.goals.map((goal) => goal.label)).toEqual(["empty list", "x :: xs"]);
-    expect(session.focusedGoalId).toBe("goal-nil");
+    expect(session.focusedGoalId).toBe("goal-0");
     expect(equationToText(session.goals[1]!)).toContain("map (f ∘ g) (x :: xs)");
     expect(equationToText(session.goals[1]!)).toContain("map f (map g (x :: xs))");
 
     session = reduceUntilReflexive(session);
     expect(session.goals[0]?.status).toBe("solved");
-    expect(session.focusedGoalId).toBe("goal-cons");
+    expect(session.focusedGoalId).toBe("goal-1");
 
     session = reduceUntilReflexive(session);
     expect(session.goals.every((goal) => goal.status === "solved")).toBe(true);
     expect(session.kernelStatus).toBe("checked");
     expect(session.goals[1]?.steps.some((step) => step.reason === "rewrite with IH")).toBe(true);
+  });
+
+  it.each([
+    ["bool-involution", "cases:b"],
+    ["nat-add-zero", "induction:n"],
+    ["list-append-nil", "induction:xs"],
+    ["list-map-append", "induction:xs"],
+    ["list-rev-append", "induction:xs"],
+    ["list-rev-involution", "induction:xs"],
+  ])("completes the %s curriculum lesson", (lessonId, analysisMove) => {
+    let session = createLessonSession(lessonId);
+    session = applyProofMove(session, analysisMove);
+    while (session.kernelStatus !== "checked") session = reduceUntilReflexive(session);
+    expect(session.goals.every((goal) => goal.status === "solved")).toBe(true);
+    expect(session.kernelStatus).toBe("checked");
+  });
+
+  it.each(["bool-compute", "nat-add-example"])("completes the %s computation lesson", (lessonId) => {
+    const session = reduceUntilReflexive(createLessonSession(lessonId));
+    expect(session.kernelStatus).toBe("checked");
   });
 
   it("rejects moves that were not enumerated", () => {

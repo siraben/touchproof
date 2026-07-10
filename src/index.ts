@@ -30,6 +30,15 @@ export {
   touchProofEnvironment,
   mapCompositionProof,
   verifyMapCompositionProof,
+  booleanInvolutionProof,
+  booleanComputationProof,
+  natAdditionExampleProof,
+  mapAppendProof,
+  revAppendProof,
+  revInvolutionProof,
+  addZeroRightProof,
+  appendNilRightProof,
+  verifyLessonProof,
 } from "./proof/standardLibrary.js";
 export {
   programVar,
@@ -37,6 +46,8 @@ export {
   call as programCall,
   exprToText as programExprToText,
   equationToText,
+  lessonCatalog,
+  createLessonSession,
   createMapCompositionSession,
   enumerateProofMoves,
   applyProofMove,
@@ -49,6 +60,7 @@ export type {
   ProofStep,
   ProofSession,
   ProofMove,
+  Lesson,
 } from "./proof/session.js";
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,10 @@
 "use client";
 
-import type { ProgramExpr, ProofMove, ProofSession } from "@touchproof/core";
+import type { Lesson, ProgramExpr, ProofMove, ProofSession } from "@touchproof/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { dropMove, movesForHandle, proofProgress } from "@/lib/viewModel";
 
-type ApiState = { session: ProofSession; moves: ProofMove[] };
+type ApiState = { session: ProofSession; moves: ProofMove[]; lessons: Lesson[] };
 type View = "visual" | "notebook";
 
 function Expression({
@@ -24,6 +24,10 @@ function Expression({
     if (expression.kind === "var") return expression.name;
     if (expression.kind === "ctor") {
       if (expression.name === "nil") return "[]";
+      if (expression.name === "zero") return "0";
+      if (expression.name === "succ" && expression.args.length === 1) {
+        return <><span className="function-name">S</span><span className="paren"> (</span><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
+      }
       if (expression.name === "cons" && expression.args.length === 2) {
         return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator"> :: </span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
       }
@@ -39,6 +43,19 @@ function Expression({
       const value = expression.args[1]!;
       const needsParens = value.kind === "call" || (value.kind === "ctor" && value.name !== "nil");
       return <><span className="function-name">map</span><span className="argument"><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /></span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
+    }
+    if (expression.name === "negb" && expression.args.length === 1) {
+      const value = expression.args[0]!;
+      const needsParens = value.kind === "call";
+      return <><span className="function-name">negb</span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
+    }
+    if (expression.name === "rev" && expression.args.length === 1) {
+      const value = expression.args[0]!;
+      const needsParens = value.kind === "call" || (value.kind === "ctor" && value.name !== "nil");
+      return <><span className="function-name">rev</span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
+    }
+    if ((expression.name === "add" || expression.name === "append") && expression.args.length === 2) {
+      return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator"> {expression.name === "add" ? "+" : "++"} </span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
     }
     return <><span className="function-name">{expression.name}</span>{expression.args.map((arg) => <span className="argument" key={arg.id}><Expression expression={arg} moves={moves} onMove={onMove} /></span>)}</>;
   })();
@@ -88,29 +105,47 @@ export function ProofWorkspace() {
   const importInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("touchproof:map-comp:v1");
-    const request = saved === null
-      ? fetch("/api/proof")
-      : fetch("/api/proof", {
+    const bootstrap = async () => {
+      const saved = window.localStorage.getItem("touchproof:current:v2");
+      if (saved !== null) {
+        const restored = await fetch("/api/proof", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ session: JSON.parse(saved) as unknown, inspect: true }),
         });
-    request.then(async (response) => {
-      if (!response.ok) throw new Error("Could not start the proof session.");
-      return response.json() as Promise<ApiState>;
-    }).then(setState).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not start TouchProof."));
+        if (restored.ok) return restored.json() as Promise<ApiState>;
+        window.localStorage.removeItem("touchproof:current:v2");
+      }
+      const fresh = await fetch("/api/proof");
+      if (!fresh.ok) throw new Error("Could not start the proof session.");
+      return fresh.json() as Promise<ApiState>;
+    };
+    bootstrap().then(setState).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not start TouchProof."));
   }, []);
 
   useEffect(() => {
-    if (state !== undefined) window.localStorage.setItem("touchproof:map-comp:v1", JSON.stringify(state.session));
+    if (state !== undefined) window.localStorage.setItem("touchproof:current:v2", JSON.stringify(state.session));
   }, [state]);
+
+  const startLesson = async (lessonId: string) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const response = await fetch(`/api/proof?lesson=${encodeURIComponent(lessonId)}`);
+      if (!response.ok) throw new Error("Could not start that lesson.");
+      setState(await response.json() as ApiState);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not start that lesson.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const reset = async () => {
     setBusy(true);
     try {
-      window.localStorage.removeItem("touchproof:map-comp:v1");
-      const response = await fetch("/api/proof");
+      window.localStorage.removeItem("touchproof:current:v2");
+      const response = await fetch(`/api/proof?lesson=${encodeURIComponent(state?.session.lessonId ?? "bool-involution")}`);
       setState(await response.json() as ApiState);
     } finally {
       setBusy(false);
@@ -169,7 +204,8 @@ export function ProofWorkspace() {
 
   const currentGoal = state?.session.goals.find((goal) => goal.id === state.session.focusedGoalId);
   const progress = useMemo(() => state === undefined ? { solved: 0, total: 0 } : proofProgress(state.session), [state]);
-  const inductionMove = state?.moves.find((move) => move.kind === "induction");
+  const analysisMove = state?.moves.find((move) => move.kind === "induction" || move.kind === "cases");
+  const currentLesson = state?.lessons.find((lesson) => lesson.id === state.session.lessonId);
 
   if (state === undefined) {
     return <main className="loading"><div className="brand-mark">T</div><p>{error ?? "Preparing the proof…"}</p></main>;
@@ -199,13 +235,24 @@ export function ProofWorkspace() {
       </header>
 
       <section className="lesson-strip">
-        <div><span className="eyebrow">Lesson 7 · Induction</span><h1>Map preserves composition</h1></div>
-        <p>Transform both sides until they are visibly the same. Touch a highlighted call to unfold it.</p>
+        <div><span className="eyebrow">{currentLesson?.chapter} · {currentLesson?.concept}</span><h1>{currentLesson?.title}</h1></div>
+        <p>Transform both sides until they are visibly the same. Touch highlighted calls, then solve only the local obligations.</p>
         <div className="progress"><strong>{progress.solved}/{progress.total}</strong><span>obligations</span></div>
       </section>
 
       <div className="body-grid">
         <aside className="context-panel">
+          <h2>Learning path</h2>
+          <nav className="lesson-list" aria-label="Lessons">
+            {state.lessons.map((lesson, index) => (
+              <button
+                className={lesson.id === state.session.lessonId ? "active" : ""}
+                disabled={busy}
+                key={lesson.id}
+                onClick={() => void startLesson(lesson.id)}
+              ><span>{index + 1}</span><div><strong>{lesson.title}</strong><small>{lesson.concept}</small></div></button>
+            ))}
+          </nav>
           <h2>In this case</h2>
           <div className="context-list">
             {currentGoal?.context.map((binding) => <code key={binding}>{binding}</code>)}
@@ -225,22 +272,23 @@ export function ProofWorkspace() {
               <small>Drag onto a matching expression</small>
             </div>
           ))}
-          {inductionMove !== undefined && (
+          {analysisMove !== undefined && (
             <div
-              id="induction-zone"
+              id="analysis-zone"
               className="induction-zone"
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
                 event.preventDefault();
                 const handle = event.dataTransfer.getData("application/x-touchproof-handle");
-                const move = dropMove(state.moves, handle, "induction-zone");
+                const move = dropMove(state.moves, handle, "analysis-zone");
                 if (move !== undefined) void send({ moveId: move.id });
               }}
             >
-              <strong>Analyze this list</strong>
-              <span>Drag <code>l</code> here to create the cases you need.</span>
+              <strong>{analysisMove.kind === "cases" ? "Analyze this value" : "Use induction"}</strong>
+              <span>Drag <code>{state.session.analysis?.variable}</code> here to create the local cases you need.</span>
             </div>
           )}
+          {currentLesson !== undefined && <a className="lesson-source" href={currentLesson.sourceUrl} target="_blank" rel="noreferrer">{currentLesson.source} ↗</a>}
           <div className="why-card"><span>Why is this valid?</span><p>{state.moves[0]?.explanation ?? "This obligation is complete."}</p></div>
         </aside>
 
@@ -270,14 +318,14 @@ export function ProofWorkspace() {
                 <span className="cursor-icon">↖</span>
                 {state.moves.some((move) => move.kind === "rewrite")
                   ? "Drag IH onto the matching recursive call"
-                  : inductionMove !== undefined
-                    ? "Drag l into the analysis tray"
+                  : analysisMove !== undefined
+                    ? `Drag ${state.session.analysis?.variable} into the analysis tray`
                     : "Touch a dotted expression to apply its defining equation"}
               </div>
               <div className="move-palette">
                 {state.moves.map((move) => (
                   <button key={move.id} disabled={busy} onClick={() => void send({ moveId: move.id })}>
-                    <span>{move.kind === "reduce" ? "↳" : move.kind === "rewrite" ? "⇢" : move.kind === "induction" ? "⑂" : "✓"}</span>
+                    <span>{move.kind === "reduce" ? "↳" : move.kind === "rewrite" ? "⇢" : move.kind === "induction" || move.kind === "cases" ? "⑂" : "✓"}</span>
                     <div><strong>{move.label}</strong><small>{move.explanation}</small></div>
                   </button>
                 ))}
@@ -287,11 +335,11 @@ export function ProofWorkspace() {
 
           {view === "notebook" && (
             <div className="notebook-view">
-              <div className="source-cell"><span>theorem</span> map_comp (f g : A → A) (l : List A) :<br />&nbsp;&nbsp;map (f ∘ g) l = map f (map g l)</div>
+              <div className="source-cell"><span>theorem</span> {state.session.theorem} :<br />&nbsp;&nbsp;{state.session.statement}</div>
               {state.session.goals.map((goal) => (
                 <article className="proof-cell" key={goal.id}>
                   <header><span>{goal.status === "solved" ? "✓" : "○"}</span> case {goal.label}</header>
-                  {goal.hypotheses.map((hypothesis) => <div className="notebook-ih" key={hypothesis.id}>IH · map (f ∘ g) xs = map f (map g xs)</div>)}
+                  {goal.hypotheses.map((hypothesis) => <div className="notebook-ih" key={hypothesis.id}>IH · <Expression expression={hypothesis.left} moves={[]} onMove={() => undefined} /> = <Expression expression={hypothesis.right} moves={[]} onMove={() => undefined} /></div>)}
                   {goal.steps.map((step, index) => <div className="notebook-step" key={`${step.reason}-${index}`}><code>{step.equation}</code><small>{step.reason}</small></div>)}
                 </article>
               ))}

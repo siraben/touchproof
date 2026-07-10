@@ -39,6 +39,14 @@ h1 { margin: 5px 0 0; font: 700 32px/1.1 Georgia, serif; letter-spacing: -.025em
 .body-grid { display: grid; grid-template-columns: 290px 1fr; min-height: calc(100vh - 174px); }
 .context-panel { padding: 26px 22px; border-right: 1px solid var(--line); background: #efede4; }
 .context-panel h2 { margin: 0 0 14px; font: 700 16px Georgia, serif; }
+.lesson-list { display: grid; gap: 6px; margin: 0 0 26px; }
+.lesson-list button { display: flex; gap: 9px; align-items: center; padding: 8px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--muted); text-align: left; cursor: pointer; }
+.lesson-list button > span { display: grid; place-items: center; flex: 0 0 25px; height: 25px; border-radius: 50%; background: #dedcd3; font-size: 11px; }
+.lesson-list button strong, .lesson-list button small { display: block; }
+.lesson-list button strong { color: inherit; font-size: 12px; }
+.lesson-list button small { margin-top: 2px; font-size: 10px; }
+.lesson-list button.active { border-color: #a7c9b7; background: var(--panel); color: var(--ink); }
+.lesson-list button.active > span { background: var(--mint); color: var(--green); }
 .context-list { display: grid; gap: 7px; }
 .context-list code { padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.58); font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .hypothesis-card { margin-top: 20px; padding: 14px; border: 1px solid #a7c9b7; border-radius: 13px; background: var(--mint); cursor: grab; box-shadow: 0 5px 18px rgba(23,107,77,.08); }
@@ -49,6 +57,8 @@ h1 { margin: 5px 0 0; font: 700 32px/1.1 Georgia, serif; letter-spacing: -.025em
 .induction-zone:hover { border-color: var(--green); background: rgba(201,247,223,.35); }
 .induction-zone strong { color: var(--ink); }
 .induction-zone span { font-size: 13px; line-height: 1.45; }
+.lesson-source { display: block; margin: 13px 2px 0; color: var(--muted); font-size: 10px; line-height: 1.4; text-decoration: none; }
+.lesson-source:hover { color: var(--green); }
 .why-card { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 18px; }
 .why-card span { font-size: 12px; font-weight: 800; color: var(--green); }
 .why-card p { margin: 7px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
