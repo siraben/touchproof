@@ -1,17 +1,17 @@
 {
-  "name": "wyrm-math",
-  "version": "0.5.2",
-  "description": "Exact, conditionally-sound symbolic algebra engine for manipulative interfaces: immutable expression trees, rewrite rules with first-class assumptions, derivation trees, move enumeration, and DOM-free layout geometry.",
+  "name": "@touchproof/core",
+  "version": "0.1.0",
+  "description": "A visual-first equational reasoning and theorem-proving engine backed by dependent types.",
   "license": "MIT",
-  "author": "Tony Di Croce",
+  "author": "Tony Di Croce and TouchProof contributors",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dicroce/wyrm_math.git"
+    "url": "https://github.com/siraben/touchproof.git"
   },
   "keywords": [
-    "algebra",
-    "computer-algebra",
-    "math",
+    "theorem-proving",
+    "dependent-types",
+    "equational-reasoning",
     "education",
     "symbolic",
     "rewrite-rules",
@@ -37,6 +37,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "dev": "pnpm --dir apps/web dev",
+    "build:web": "pnpm --dir apps/web build",
+    "test:web": "pnpm --dir apps/web test",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm build:web",
     "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
@@ -45,5 +49,5 @@
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   },
-  "packageManager": "pnpm@11.5.3"
+  "packageManager": "pnpm@10.12.1"
 }
