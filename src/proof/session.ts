@@ -470,7 +470,7 @@ export function enumerateProofMoves(session: ProofSession): ProofMove[] {
         id: `${session.analysis.kind}:${session.analysis.variable}`,
         kind: session.analysis.kind,
         label: session.analysis.kind === "cases"
-          ? `Analyze ${session.analysis.variable}`
+          ? `Case analysis on ${session.analysis.variable}`
           : `Induct on ${session.analysis.variable}`,
         explanation: session.analysis.kind === "cases"
           ? `Consider every constructor of ${session.analysis.type}.`

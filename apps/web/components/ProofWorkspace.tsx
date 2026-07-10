@@ -1,11 +1,16 @@
 "use client";
 
 import type { Lesson, ProgramExpr, ProofMove, ProofSession } from "@touchproof/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { dropMove, movesForHandle, proofProgress } from "@/lib/viewModel";
 
 type ApiState = { session: ProofSession; moves: ProofMove[]; lessons: Lesson[] };
 type View = "visual" | "notebook";
+
+const SelectionContext = createContext<{
+  selectedHandle?: string;
+  select: (handle?: string) => void;
+}>({ select: () => undefined });
 
 function Expression({
   expression,
@@ -16,8 +21,8 @@ function Expression({
   moves: readonly ProofMove[];
   onMove: (moveId: string) => void;
 }) {
+  const selection = useContext(SelectionContext);
   const fromHere = movesForHandle(moves, expression.id);
-  const tapMove = fromHere.find((move) => move.dropTarget === undefined && move.kind === "reduce");
   const isDropTarget = moves.some((move) => move.dropTarget === expression.id);
 
   const content = (() => {
@@ -62,18 +67,21 @@ function Expression({
 
   return (
     <span
-      className={`expression ${fromHere.length > 0 ? "movable" : ""} ${tapMove !== undefined ? "tappable" : ""} ${isDropTarget ? "drop-target" : ""}`}
+      className={`expression ${fromHere.length > 0 ? "movable tappable" : ""} ${selection.selectedHandle === expression.id ? "selected" : ""} ${isDropTarget ? "drop-target" : ""}`}
       draggable={fromHere.length > 0}
-      role={tapMove === undefined ? undefined : "button"}
-      tabIndex={tapMove === undefined ? undefined : 0}
-      title={tapMove?.explanation ?? fromHere[0]?.explanation}
+      role={fromHere.length === 0 ? undefined : "button"}
+      tabIndex={fromHere.length === 0 ? undefined : 0}
+      title={fromHere.length === 0 ? undefined : "Click for proof actions, or drag to a highlighted target"}
       onClick={(event) => {
-        if (tapMove === undefined) return;
+        if (fromHere.length === 0) return;
         event.stopPropagation();
-        onMove(tapMove.id);
+        selection.select(selection.selectedHandle === expression.id ? undefined : expression.id);
       }}
       onKeyDown={(event) => {
-        if (tapMove !== undefined && (event.key === "Enter" || event.key === " ")) onMove(tapMove.id);
+        if (fromHere.length > 0 && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          selection.select(expression.id);
+        }
       }}
       onDragStart={(event) => {
         event.stopPropagation();
@@ -102,6 +110,7 @@ export function ProofWorkspace() {
   const [view, setView] = useState<View>("visual");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [selectedHandle, setSelectedHandle] = useState<string>();
   const importInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -195,6 +204,7 @@ export function ProofWorkspace() {
       const result = await response.json() as ApiState & { error?: string };
       if (!response.ok) throw new Error(result.error ?? "The proof step was rejected.");
       setState(result);
+      setSelectedHandle(undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The proof step was rejected.");
     } finally {
@@ -206,13 +216,16 @@ export function ProofWorkspace() {
   const progress = useMemo(() => state === undefined ? { solved: 0, total: 0 } : proofProgress(state.session), [state]);
   const analysisMove = state?.moves.find((move) => move.kind === "induction" || move.kind === "cases");
   const currentLesson = state?.lessons.find((lesson) => lesson.id === state.session.lessonId);
+  const contextualMoves = state?.moves.filter((move) => move.handle === selectedHandle) ?? [];
+  const closeMove = state?.moves.find((move) => move.kind === "close");
 
   if (state === undefined) {
     return <main className="loading"><div className="brand-mark">T</div><p>{error ?? "Preparing the proof…"}</p></main>;
   }
 
   return (
-    <main className="workspace">
+    <SelectionContext.Provider value={{ ...(selectedHandle === undefined ? {} : { selectedHandle }), select: setSelectedHandle }}>
+    <main className="workspace" onClick={() => setSelectedHandle(undefined)}>
       <header className="topbar">
         <div className="brand"><span className="brand-mark">T</span><span>TouchProof</span><small>Learn by transforming</small></div>
         <div className="view-switch" aria-label="Proof view">
@@ -309,11 +322,28 @@ export function ProofWorkspace() {
           {view === "visual" && currentGoal !== undefined && (
             <div className="visual-view">
               <div className="case-label">Current obligation · {currentGoal.label}</div>
-              <div className={`equation-card ${busy ? "busy" : ""}`}>
+              <div className={`equation-card ${busy ? "busy" : ""}`} onClick={(event) => event.stopPropagation()}>
                 <Expression expression={currentGoal.left} moves={state.moves} onMove={(moveId) => void send({ moveId })} />
-                <span className="equals">=</span>
+                <button
+                  className={`equals ${closeMove === undefined ? "" : "closable"}`}
+                  disabled={closeMove === undefined || busy}
+                  title={closeMove === undefined ? "Keep transforming until both sides match" : "Close by reflexivity"}
+                  onClick={() => closeMove !== undefined && void send({ moveId: closeMove.id })}
+                >=</button>
                 <Expression expression={currentGoal.right} moves={state.moves} onMove={(moveId) => void send({ moveId })} />
               </div>
+              {contextualMoves.length > 0 && (
+                <div className="context-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+                  <div className="context-menu-title">What do you want to do here?</div>
+                  {contextualMoves.map((move) => (
+                    <button role="menuitem" key={move.id} onClick={() => void send({ moveId: move.id })}>
+                      <span>{move.kind === "cases" ? "⑂" : move.kind === "induction" ? "ℕ" : move.kind === "rewrite" ? "⇢" : "↳"}</span>
+                      <div><strong>{move.label}</strong><small>{move.explanation}</small></div>
+                    </button>
+                  ))}
+                  {contextualMoves.some((move) => move.dropTarget !== undefined) && <p>You can also drag this term onto a highlighted target.</p>}
+                </div>
+              )}
               <div className="gesture-hint">
                 <span className="cursor-icon">↖</span>
                 {state.moves.some((move) => move.kind === "rewrite")
@@ -349,5 +379,6 @@ export function ProofWorkspace() {
         </section>
       </div>
     </main>
+    </SelectionContext.Provider>
   );
 }
