@@ -37,11 +37,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
-    "dev": "pnpm --dir apps/web dev",
-    "build:web": "pnpm --dir apps/web build",
-    "test:web": "pnpm --dir apps/web test",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm build:web",
-    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
+    "dev": "corepack pnpm --dir apps/web dev",
+    "build:web": "corepack pnpm --dir apps/web build",
+    "test:web": "corepack pnpm --dir apps/web test",
+    "check": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm build && corepack pnpm --dir apps/web typecheck && corepack pnpm --dir apps/web test && corepack pnpm build:web",
+    "prepublishOnly": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm build"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
