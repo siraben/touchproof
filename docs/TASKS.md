@@ -14,6 +14,10 @@
 - [x] Support dragging `l` into induction and dragging `IH` onto a matching term.
 - [x] Add keyboard/button equivalents for proof gestures.
 - [x] Add local persistence plus validated JSON import/export.
+- [x] Add a shared program AST/parser and declarative pattern-matching reducer.
+- [x] Generate case analysis and induction from inductive datatype metadata.
+- [x] Generate movable definition cards and script output from executable declarations.
+- [x] Add point-anchored contextual menus and back/forward proof history.
 - [x] Test the complete map-composition flow through the TypeScript API.
 - [x] Add the Software Foundations-inspired ramp through Boolean computation,
       Boolean elimination, Nat computation and induction, append, map/append,

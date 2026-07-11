@@ -1,16 +1,59 @@
 "use client";
 
-import type { Lesson, ProgramExpr, ProofMove, ProofSession } from "@touchproof/core";
+import {
+  definitionByName,
+  definitionsToScript,
+  inductiveByName,
+  inductiveToScript,
+  type Lesson,
+  type ProgramExpr,
+  type ProofMove,
+  type ProofSession,
+} from "@touchproof/core";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { dropMove, movesForHandle, proofProgress } from "@/lib/viewModel";
 
 type ApiState = { session: ProofSession; moves: ProofMove[]; lessons: Lesson[] };
-type View = "visual" | "notebook";
+type View = "visual" | "notebook" | "script";
 
 const SelectionContext = createContext<{
   selectedHandle?: string;
-  select: (handle?: string) => void;
+  select: (handle?: string, point?: { x: number; y: number }) => void;
 }>({ select: () => undefined });
+
+function CanvasCard({
+  title,
+  initial,
+  className = "",
+  children,
+}: {
+  title: string;
+  initial: { x: number; y: number };
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [position, setPosition] = useState(initial);
+  const drag = useRef<{ pointerId: number; dx: number; dy: number } | undefined>(undefined);
+  return (
+    <section className={`canvas-card ${className}`} style={{ left: position.x, top: position.y }} onClick={(event) => event.stopPropagation()}>
+      <header
+        className="canvas-card-handle"
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          drag.current = { pointerId: event.pointerId, dx: event.clientX - position.x, dy: event.clientY - position.y };
+        }}
+        onPointerMove={(event) => {
+          if (drag.current?.pointerId !== event.pointerId) return;
+          setPosition({ x: Math.max(8, event.clientX - drag.current.dx), y: Math.max(8, event.clientY - drag.current.dy) });
+        }}
+        onPointerUp={(event) => {
+          if (drag.current?.pointerId === event.pointerId) drag.current = undefined;
+        }}
+      ><span>⠿</span>{title}</header>
+      <div className="canvas-card-body">{children}</div>
+    </section>
+  );
+}
 
 function Expression({
   expression,
@@ -75,12 +118,16 @@ function Expression({
       onClick={(event) => {
         if (fromHere.length === 0) return;
         event.stopPropagation();
-        selection.select(selection.selectedHandle === expression.id ? undefined : expression.id);
+        selection.select(
+          selection.selectedHandle === expression.id ? undefined : expression.id,
+          { x: event.clientX, y: event.clientY },
+        );
       }}
       onKeyDown={(event) => {
         if (fromHere.length > 0 && (event.key === "Enter" || event.key === " ")) {
           event.preventDefault();
-          selection.select(expression.id);
+          const bounds = event.currentTarget.getBoundingClientRect();
+          selection.select(expression.id, { x: bounds.right, y: bounds.bottom });
         }
       }}
       onDragStart={(event) => {
@@ -110,12 +157,14 @@ export function ProofWorkspace() {
   const [view, setView] = useState<View>("visual");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [selectedHandle, setSelectedHandle] = useState<string>();
+  const [selection, setSelection] = useState<{ handle: string; x: number; y: number }>();
+  const [undoStack, setUndoStack] = useState<ApiState[]>([]);
+  const [redoStack, setRedoStack] = useState<ApiState[]>([]);
   const importInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const bootstrap = async () => {
-      const saved = window.localStorage.getItem("touchproof:current:v2");
+      const saved = window.localStorage.getItem("touchproof:current:v3");
       if (saved !== null) {
         const restored = await fetch("/api/proof", {
           method: "POST",
@@ -123,7 +172,7 @@ export function ProofWorkspace() {
           body: JSON.stringify({ session: JSON.parse(saved) as unknown, inspect: true }),
         });
         if (restored.ok) return restored.json() as Promise<ApiState>;
-        window.localStorage.removeItem("touchproof:current:v2");
+        window.localStorage.removeItem("touchproof:current:v3");
       }
       const fresh = await fetch("/api/proof");
       if (!fresh.ok) throw new Error("Could not start the proof session.");
@@ -133,7 +182,7 @@ export function ProofWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (state !== undefined) window.localStorage.setItem("touchproof:current:v2", JSON.stringify(state.session));
+    if (state !== undefined) window.localStorage.setItem("touchproof:current:v3", JSON.stringify(state.session));
   }, [state]);
 
   const startLesson = async (lessonId: string) => {
@@ -143,6 +192,8 @@ export function ProofWorkspace() {
       const response = await fetch(`/api/proof?lesson=${encodeURIComponent(lessonId)}`);
       if (!response.ok) throw new Error("Could not start that lesson.");
       setState(await response.json() as ApiState);
+      setUndoStack([]);
+      setRedoStack([]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not start that lesson.");
     } finally {
@@ -153,9 +204,11 @@ export function ProofWorkspace() {
   const reset = async () => {
     setBusy(true);
     try {
-      window.localStorage.removeItem("touchproof:current:v2");
+      window.localStorage.removeItem("touchproof:current:v3");
       const response = await fetch(`/api/proof?lesson=${encodeURIComponent(state?.session.lessonId ?? "bool-involution")}`);
       setState(await response.json() as ApiState);
+      setUndoStack([]);
+      setRedoStack([]);
     } finally {
       setBusy(false);
     }
@@ -184,6 +237,8 @@ export function ProofWorkspace() {
       const result = await response.json() as ApiState & { error?: string };
       if (!response.ok) throw new Error(result.error ?? "The proof document was rejected.");
       setState(result);
+      setUndoStack([]);
+      setRedoStack([]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The proof document was rejected.");
     } finally {
@@ -203,8 +258,10 @@ export function ProofWorkspace() {
       });
       const result = await response.json() as ApiState & { error?: string };
       if (!response.ok) throw new Error(result.error ?? "The proof step was rejected.");
+      setUndoStack((previous) => [...previous, state]);
+      setRedoStack([]);
       setState(result);
-      setSelectedHandle(undefined);
+      setSelection(undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The proof step was rejected.");
     } finally {
@@ -216,23 +273,52 @@ export function ProofWorkspace() {
   const progress = useMemo(() => state === undefined ? { solved: 0, total: 0 } : proofProgress(state.session), [state]);
   const analysisMove = state?.moves.find((move) => move.kind === "induction" || move.kind === "cases");
   const currentLesson = state?.lessons.find((lesson) => lesson.id === state.session.lessonId);
-  const contextualMoves = state?.moves.filter((move) => move.handle === selectedHandle) ?? [];
+  const contextualMoves = state?.moves.filter((move) => move.handle === selection?.handle) ?? [];
   const closeMove = state?.moves.find((move) => move.kind === "close");
+  const undo = () => {
+    const previous = undoStack.at(-1);
+    if (previous === undefined || state === undefined) return;
+    setUndoStack((items) => items.slice(0, -1));
+    setRedoStack((items) => [...items, state]);
+    setState(previous);
+    setSelection(undefined);
+  };
+  const redo = () => {
+    const next = redoStack.at(-1);
+    if (next === undefined || state === undefined) return;
+    setRedoStack((items) => items.slice(0, -1));
+    setUndoStack((items) => [...items, state]);
+    setState(next);
+    setSelection(undefined);
+  };
 
   if (state === undefined) {
     return <main className="loading"><div className="brand-mark">T</div><p>{error ?? "Preparing the proof…"}</p></main>;
   }
 
   return (
-    <SelectionContext.Provider value={{ ...(selectedHandle === undefined ? {} : { selectedHandle }), select: setSelectedHandle }}>
-    <main className="workspace" onClick={() => setSelectedHandle(undefined)}>
+    <SelectionContext.Provider value={{
+      ...(selection === undefined ? {} : { selectedHandle: selection.handle }),
+      select: (handle, point) => {
+        if (handle === undefined) setSelection(undefined);
+        else if (point !== undefined) setSelection({
+          handle,
+          x: Math.min(point.x, window.innerWidth - 410),
+          y: Math.min(point.y, window.innerHeight - 290),
+        });
+      },
+    }}>
+    <main className="workspace" onClick={() => setSelection(undefined)}>
       <header className="topbar">
         <div className="brand"><span className="brand-mark">T</span><span>TouchProof</span><small>Learn by transforming</small></div>
         <div className="view-switch" aria-label="Proof view">
           <button className={view === "visual" ? "active" : ""} onClick={() => setView("visual")}>Visual</button>
           <button className={view === "notebook" ? "active" : ""} onClick={() => setView("notebook")}>Notebook</button>
+          <button className={view === "script" ? "active" : ""} onClick={() => setView("script")}>Script</button>
         </div>
         <div className="header-actions">
+          <button className="history-button" disabled={undoStack.length === 0} title="Back one proof step" onClick={undo}>←</button>
+          <button className="history-button" disabled={redoStack.length === 0} title="Forward one proof step" onClick={redo}>→</button>
           <button onClick={exportDocument}>Export</button>
           <button onClick={() => importInput.current?.click()}>Import</button>
           <button onClick={() => void reset()}>Reset</button>
@@ -266,43 +352,7 @@ export function ProofWorkspace() {
               ><span>{index + 1}</span><div><strong>{lesson.title}</strong><small>{lesson.concept}</small></div></button>
             ))}
           </nav>
-          <h2>In this case</h2>
-          <div className="context-list">
-            {currentGoal?.context.map((binding) => <code key={binding}>{binding}</code>)}
-          </div>
-          {currentGoal?.hypotheses.map((hypothesis) => (
-            <div
-              className="hypothesis-card"
-              draggable
-              key={hypothesis.id}
-              onDragStart={(event) => {
-                event.dataTransfer.setData("application/x-touchproof-handle", hypothesis.id);
-                event.dataTransfer.effectAllowed = "move";
-              }}
-            >
-              <span>{hypothesis.name}</span>
-              <div><Expression expression={hypothesis.left} moves={[]} onMove={() => undefined} /> = <Expression expression={hypothesis.right} moves={[]} onMove={() => undefined} /></div>
-              <small>Drag onto a matching expression</small>
-            </div>
-          ))}
-          {analysisMove !== undefined && (
-            <div
-              id="analysis-zone"
-              className="induction-zone"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                const handle = event.dataTransfer.getData("application/x-touchproof-handle");
-                const move = dropMove(state.moves, handle, "analysis-zone");
-                if (move !== undefined) void send({ moveId: move.id });
-              }}
-            >
-              <strong>{analysisMove.kind === "cases" ? "Analyze this value" : "Use induction"}</strong>
-              <span>Drag <code>{state.session.analysis?.variable}</code> here to create the local cases you need.</span>
-            </div>
-          )}
           {currentLesson !== undefined && <a className="lesson-source" href={currentLesson.sourceUrl} target="_blank" rel="noreferrer">{currentLesson.source} ↗</a>}
-          <div className="why-card"><span>Why is this valid?</span><p>{state.moves[0]?.explanation ?? "This obligation is complete."}</p></div>
         </aside>
 
         <section className="proof-stage">
@@ -321,6 +371,54 @@ export function ProofWorkspace() {
 
           {view === "visual" && currentGoal !== undefined && (
             <div className="visual-view">
+              <CanvasCard key={`context-${state.session.lessonId}-${currentGoal.id}`} title="Local context" initial={{ x: 22, y: 72 }} className="context-canvas-card">
+                <div className="context-list">
+                  {currentGoal.context.length === 0 ? <small>No variables yet—just compute.</small> : currentGoal.context.map((binding) => <code key={binding}>{binding}</code>)}
+                </div>
+                {currentGoal.hypotheses.map((hypothesis) => (
+                  <div
+                    className="hypothesis-card"
+                    draggable
+                    key={hypothesis.id}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData("application/x-touchproof-handle", hypothesis.id);
+                      event.dataTransfer.effectAllowed = "move";
+                    }}
+                  >
+                    <span>{hypothesis.name}</span>
+                    <div><Expression expression={hypothesis.left} moves={[]} onMove={() => undefined} /> = <Expression expression={hypothesis.right} moves={[]} onMove={() => undefined} /></div>
+                    <small>Click for options or drag onto a matching expression</small>
+                  </div>
+                ))}
+                {analysisMove !== undefined && (
+                  <div
+                    id="analysis-zone"
+                    className="induction-zone"
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const handle = event.dataTransfer.getData("application/x-touchproof-handle");
+                      const move = dropMove(state.moves, handle, "analysis-zone");
+                      if (move !== undefined) void send({ moveId: move.id });
+                    }}
+                  >
+                    <strong>{analysisMove.kind === "cases" ? "Analyze this value" : "Use induction"}</strong>
+                    <span>Drag <code>{state.session.analysis?.variable}</code> here—or click it and choose the action.</span>
+                  </div>
+                )}
+              </CanvasCard>
+              {state.session.inductiveNames.map(inductiveByName).filter((definition) => definition !== undefined).map((definition, index) => (
+                <CanvasCard key={`${state.session.lessonId}-${definition.name}`} title={`data ${definition.name}`} initial={{ x: 830, y: 72 + index * 175 }} className="definition-canvas-card">
+                  <code>{inductiveToScript(definition)}</code>
+                  <small>Cases and induction are generated from these constructors.</small>
+                </CanvasCard>
+              ))}
+              {state.session.definitionNames.map(definitionByName).filter((definition) => definition !== undefined).map((definition, index) => (
+                <CanvasCard key={`${state.session.lessonId}-${definition.name}`} title={`${definition.name} : ${definition.type}`} initial={{ x: 830, y: 247 + index * 175 }} className="definition-canvas-card">
+                  {definition.clauses.map((clause) => <code key={clause.script}>{clause.script}</code>)}
+                  <small>These equations are the available computation rules.</small>
+                </CanvasCard>
+              ))}
               <div className="case-label">Current obligation · {currentGoal.label}</div>
               <div className={`equation-card ${busy ? "busy" : ""}`} onClick={(event) => event.stopPropagation()}>
                 <Expression expression={currentGoal.left} moves={state.moves} onMove={(moveId) => void send({ moveId })} />
@@ -333,7 +431,12 @@ export function ProofWorkspace() {
                 <Expression expression={currentGoal.right} moves={state.moves} onMove={(moveId) => void send({ moveId })} />
               </div>
               {contextualMoves.length > 0 && (
-                <div className="context-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+                <div
+                  className="context-menu"
+                  role="menu"
+                  style={selection === undefined ? undefined : { left: selection.x, top: selection.y }}
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <div className="context-menu-title">What do you want to do here?</div>
                   {contextualMoves.map((move) => (
                     <button role="menuitem" key={move.id} onClick={() => void send({ moveId: move.id })}>
@@ -352,6 +455,7 @@ export function ProofWorkspace() {
                     ? `Drag ${state.session.analysis?.variable} into the analysis tray`
                     : "Touch a dotted expression to apply its defining equation"}
               </div>
+              <div className="canvas-help"><strong>Why this move?</strong><span>{state.moves[0]?.explanation ?? "Every local obligation is complete."}</span></div>
               <div className="move-palette">
                 {state.moves.map((move) => (
                   <button key={move.id} disabled={busy} onClick={() => void send({ moveId: move.id })}>
@@ -373,6 +477,13 @@ export function ProofWorkspace() {
                   {goal.steps.map((step, index) => <div className="notebook-step" key={`${step.reason}-${index}`}><code>{step.equation}</code><small>{step.reason}</small></div>)}
                 </article>
               ))}
+            </div>
+          )}
+          {view === "script" && (
+            <div className="script-view">
+              <div className="script-caption">Parsed declarations and current proof state</div>
+              <pre>{`${state.session.inductiveNames.map(inductiveByName).filter((definition) => definition !== undefined).map(inductiveToScript).join("\n\n")}\n\n${definitionsToScript(state.session.definitionNames)}\n\ntheorem ${state.session.theorem} :\n  ${state.session.statement}\nproof\n${currentGoal?.steps.map((step) => `  ${step.equation}  -- ${step.reason}`).join("\n") ?? ""}`}</pre>
+              <p>The canvas, reducer, and this script are printed from the same AST and definition registry.</p>
             </div>
           )}
           {error !== undefined && <div className="error-toast" role="alert">{error}</div>}

@@ -10,8 +10,9 @@ invariant into proofs:
 The default interface is a direct-manipulation proof canvas. Tap a reducible
 function call, drag a value into case analysis, or drag a local equality onto
 a matching expression. A synchronized notebook view records the same proof as
-readable equations. Every committed step is validated by a small dependent
-type kernel.
+readable equations, while a script view exposes the parsed declarations and
+proof state. Movable definition cards make each canvas self-contained. Every
+committed step is validated by a small dependent type kernel.
 
 The learning path begins with concrete Boolean and Nat evaluation, then
 introduces Boolean elimination, induction on naturals, and a sequence of list
@@ -54,7 +55,8 @@ nix develop --command zsh -lc '
 - `src/kernel`: the trusted dependent kernel—universes, Π-types, equality,
   substitution, normalization, and bidirectional checking.
 - `src/proof`: equational proof sessions, legal-move enumeration, local
-  obligations, and the kernel-checked map-composition certificate.
+  obligations, parsed ASTs, declarative definitions/inductives, and checked
+  theorem certificates.
 - `apps/web`: Next.js visual editor, notebook view, TypeScript proof API, and
   local proof-document persistence.
 - `docs/WYRM_ARCHITECTURE.md`: the original Wyrm Math architecture retained

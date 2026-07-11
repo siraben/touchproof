@@ -9,7 +9,8 @@ describe("proof workspace view model", () => {
 
   it("resolves only an enumerated drag and drop pair", () => {
     const moves = enumerateProofMoves(createMapCompositionSession());
-    expect(dropMove(moves, "var-l", "analysis-zone")?.id).toBe("induction:l");
+    const induction = moves.find((move) => move.id === "induction:l")!;
+    expect(dropMove(moves, induction.handle, "analysis-zone")?.id).toBe("induction:l");
     expect(dropMove(moves, "var-f", "analysis-zone")).toBeUndefined();
   });
 });

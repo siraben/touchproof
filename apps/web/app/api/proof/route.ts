@@ -23,6 +23,10 @@ function isProofSession(value: unknown): value is ProofSession {
     && typeof candidate.statement === "string"
     && typeof candidate.focusedGoalId === "string"
     && (candidate.kernelStatus === "pending" || candidate.kernelStatus === "checked")
+    && Array.isArray(candidate.definitionNames)
+    && candidate.definitionNames.every((name) => typeof name === "string")
+    && Array.isArray(candidate.inductiveNames)
+    && candidate.inductiveNames.every((name) => typeof name === "string")
     && Array.isArray(candidate.goals)
     && candidate.goals.length > 0
     && candidate.goals.length <= 8

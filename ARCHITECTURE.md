@@ -43,14 +43,26 @@ complete proof term passes the kernel.
 
 Move enumeration currently offers:
 
-- structural induction on the unknown list;
-- one-step reduction of `map` and composition;
+- case analysis or structural induction from datatype constructors;
+- one-step reduction through any matching definition clause;
 - occurrence-specific rewriting with the local induction hypothesis;
 - closure by reflexivity.
 
 Reduction and rewriting preserve ids outside the selected occurrence. The
 notebook view reads the same proof-session state as the visual view, so there
 is no second proof representation to synchronize.
+
+The interactive language is not implemented as one reducer per lesson.
+`src/proof/ast.ts` owns the shared parsed expression tree,
+`src/proof/definitions.ts` stores pattern-matching equations, and the generic
+reducer matches calls against those clauses. Move names and explanations come
+from the clause that matched. `src/proof/inductives.ts` likewise drives cases
+and recursive induction hypotheses from datatype metadata. Lesson specs contain
+starting goals and available prior lemmas, never a prescribed solution path.
+
+Canvas definition cards and the script view are printed from these same AST,
+definition, and inductive registries. They are executable declarations rather
+than duplicated explanatory text.
 
 ## Web boundary
 
