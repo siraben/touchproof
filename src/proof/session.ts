@@ -354,8 +354,8 @@ const lessonSpecs: Readonly<Record<string, LessonSpec>> = {
     theorem: "add_comm", context: ["a : Nat", "b : Nat"], resultType: "Nat",
     left: "add(a, b)", right: "add(b, a)", definitions: ["add"], inductives: ["Nat"],
     branchLemmas: {
-      "zero": [{ id: "lemma-add-zero-right", name: "add_zero_right", left: "add(b, zero)", right: "b" }],
-      "succ n": [{ id: "lemma-add-succ-right", name: "add_succ_right", left: "add(b, succ(n))", right: "succ(add(b, n))" }],
+      "0": [{ id: "lemma-add-zero-right", name: "add_zero_right", left: "add(b, zero)", right: "b" }],
+      "S n": [{ id: "lemma-add-succ-right", name: "add_succ_right", left: "add(b, succ(n))", right: "succ(add(b, n))" }],
     },
   },
   "list-length-append": {

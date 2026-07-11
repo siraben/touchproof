@@ -22,8 +22,8 @@ export const inductiveDefinitions: readonly InductiveDefinition[] = [
     { name: "false", label: "false", fields: [] },
   ] },
   { name: "Nat", parameters: [], constructors: [
-    { name: "zero", label: "zero", fields: [] },
-    { name: "succ", label: "succ n", fields: [{ name: "n", type: "Nat", recursive: true }] },
+    { name: "zero", label: "0", fields: [] },
+    { name: "succ", label: "S n", fields: [{ name: "n", type: "Nat", recursive: true }] },
   ] },
   { name: "List", parameters: ["A : Type"], constructors: [
     { name: "nil", label: "empty list", fields: [] },

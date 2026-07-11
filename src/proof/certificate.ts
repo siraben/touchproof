@@ -9,11 +9,11 @@ import {
   pi,
   recursor,
   refl,
-  termToString,
   variable,
   type Term,
 } from "../kernel/term.js";
 import { allExpressions, expressionEqual, replaceById, type Expr } from "./ast.js";
+import { cat, group, line, nest, render, text, type Doc } from "./doc.js";
 import { inductiveByName } from "./inductives.js";
 import { decodeProofSession } from "./protocol.js";
 import { touchProofEnvironment } from "./standardLibrary.js";
@@ -307,6 +307,36 @@ export interface KernelCertificate {
   readonly script: string;
 }
 
+/** Kernel terms as pretty-printer documents: flat output is byte-identical to
+ * termToString, but each compound node is a group, so at a finite width the
+ * nested applications indent tree-style instead of one enormous line. */
+function termToDoc(term: Term): Doc {
+  const broken = (...items: readonly Doc[]): Doc => group(cat(...items));
+  switch (term.kind) {
+    case "type": return text(`Type ${term.level}`);
+    case "var": return text(term.name);
+    case "const": return text(term.name);
+    case "pi": return broken(text(`(Π ${term.param} : `), termToDoc(term.domain), text(","), nest(2, cat(line, termToDoc(term.codomain))), text(")"));
+    case "lam": return broken(text(`(λ ${term.param} : `), termToDoc(term.paramType), text(","), nest(2, cat(line, termToDoc(term.body))), text(")"));
+    case "let": return broken(text(`(let ${term.name} : `), termToDoc(term.valueType), text(" :="), nest(2, cat(line, termToDoc(term.value))), text(";"), nest(2, cat(line, termToDoc(term.body))), text(")"));
+    case "app": return broken(text("("), termToDoc(term.fn), nest(2, cat(line, termToDoc(term.arg))), text(")"));
+    case "eq": return broken(text("("), termToDoc(term.left), text(" ="), nest(2, cat(line, termToDoc(term.right))), text(")"));
+    case "refl": return broken(text("refl"), nest(2, cat(line, termToDoc(term.value))));
+    case "recursor": return broken(
+      text(`${term.inductive}.rec`),
+      ...(term.parameters.length === 0 ? [] : [text(" ["), ...term.parameters.flatMap((parameter, index) => index === 0 ? [termToDoc(parameter)] : [text(", "), termToDoc(parameter)]), text("]")]),
+      ...term.cases.map((branch) => nest(2, cat(line, termToDoc(branch)))),
+      nest(2, cat(line, termToDoc(term.target))),
+    );
+    case "subst": return broken(text("subst"), nest(2, cat(line, termToDoc(term.proof))), nest(2, cat(line, termToDoc(term.motive))), nest(2, cat(line, termToDoc(term.value))));
+  }
+}
+
+/** Script layout width: proof terms wrap tree-style past this column. */
+const SCRIPT_COLUMNS = 72;
+
+const prettyTerm = (term: Term): string => render(termToDoc(term), SCRIPT_COLUMNS);
+
 /** Validate every visible transition and, when complete, the exact assembled theorem term. */
 export function checkProofSession(value: unknown): KernelCertificate {
   const session = decodeProofSession(value);
@@ -314,7 +344,7 @@ export function checkProofSession(value: unknown): KernelCertificate {
   assertAxiomFree(environment);
   for (const goal of session.goals) validateOpenGoal(goal, environment);
   if (session.goals.some((goal) => goal.status !== "solved")) {
-    return { environment, script: session.goals.map((goal) => termToString(equalityType(goal, goal.left, goal.right))).join("\n") };
+    return { environment, script: session.goals.map((goal) => prettyTerm(equalityType(goal, goal.left, goal.right))).join("\n") };
   }
   const theorem = theoremCertificate(session, environment);
   check(theorem.term, theorem.type, new Map(), environment);
@@ -322,6 +352,6 @@ export function checkProofSession(value: unknown): KernelCertificate {
     environment,
     theoremType: theorem.type,
     theoremTerm: theorem.term,
-    script: `${termToString(theorem.term)}\n: ${termToString(theorem.type)}`,
+    script: `${prettyTerm(theorem.term)}\n: ${prettyTerm(theorem.type)}`,
   };
 }

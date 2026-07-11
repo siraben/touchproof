@@ -82,6 +82,10 @@ export type { DefinitionClause, ProgramDefinition, Reduction } from "./proof/def
 export { parseProgramExpr, ProgramParseError } from "./proof/ast.js";
 export { inductiveByName, inductiveDefinitions, inductiveToScript } from "./proof/inductives.js";
 export type { ConstructorDefinition, ConstructorField, InductiveDefinition } from "./proof/inductives.js";
+// Wadler-style pretty-printing combinators (with annotations) used to lay out
+// proof scripts and definition cards; interfaces build on the same documents.
+export { annotate, cat, group, hardline, line, nest, render, renderSegments, softline, text } from "./proof/doc.js";
+export type { Doc, Segment } from "./proof/doc.js";
 
 // ---------------------------------------------------------------------------
 // 1. Expression trees
