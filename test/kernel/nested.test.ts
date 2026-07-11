@@ -7,6 +7,7 @@ import {
   enumerateProofMoves,
   exprToText,
   focusGoal,
+  type EquationGoal,
   type ProofSession,
 } from "../../src/proof/session.js";
 
@@ -113,7 +114,7 @@ describe("nested, state-derived analyses", () => {
     // Fields freshen away from the instantiated hypotheses (n stays visible),
     // and BOTH inherited hypotheses received this branch's pattern b := S n2:
     // the outer IH and the configured add_succ_right lemma.
-    const inner = session.goals.find((goal) => goal.id === "goal-1.1");
+    const inner = session.goals.find((goal) => goal.id === "goal-1.1") as EquationGoal | undefined;
     expect(inner?.label).toBe("S n · S n2");
     expect(inner?.context).toContain("n2 : Nat");
     expect(inner?.context).not.toContain("b : Nat");
@@ -147,8 +148,8 @@ describe("nested, state-derived analyses", () => {
     session = applyProofMove(session, "cases:n");
 
     expect(session.goals.map((goal) => goal.label)).toEqual(["0", "S n · 0", "S n · S n2"]);
-    const zeroIH = session.goals.find((goal) => goal.id === "goal-1.0")?.hypotheses.find((hypothesis) => hypothesis.id === "ih-n");
-    const succIH = session.goals.find((goal) => goal.id === "goal-1.1")?.hypotheses.find((hypothesis) => hypothesis.id === "ih-n");
+    const zeroIH = (session.goals.find((goal) => goal.id === "goal-1.0") as EquationGoal | undefined)?.hypotheses.find((hypothesis) => hypothesis.id === "ih-n");
+    const succIH = (session.goals.find((goal) => goal.id === "goal-1.1") as EquationGoal | undefined)?.hypotheses.find((hypothesis) => hypothesis.id === "ih-n");
     expect(zeroIH && `${exprToText(zeroIH.left)} = ${exprToText(zeroIH.right)}`).toBe("0 + 0 = 0");
     expect(succIH && `${exprToText(succIH.left)} = ${exprToText(succIH.right)}`).toBe("S n2 + 0 = S n2");
 

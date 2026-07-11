@@ -9,6 +9,7 @@ import {
   pi,
   recursor,
   refl,
+  type,
   variable,
   type Term,
 } from "../kernel/term.js";
@@ -18,7 +19,16 @@ import { cat, fill, group, line, nest, render, text, type Doc } from "./doc.js";
 import { inductiveByName } from "./inductives.js";
 import { decodeProofSession } from "./protocol.js";
 import { touchProofEnvironment } from "./standardLibrary.js";
-import { instantiateHypothesis, type EquationGoal, type Hypothesis, type ProofSession, type ProofStep } from "./session.js";
+import {
+  instantiateHypothesis,
+  isPropositionGoal,
+  type EquationGoal,
+  type Hypothesis,
+  type ProofGoal,
+  type ProofSession,
+  type ProofStep,
+  type PropositionGoal,
+} from "./session.js";
 
 const lemmaNames: Readonly<Record<string, string>> = {
   append_nil: "append_nil_right",
@@ -49,7 +59,9 @@ function binders(entries: readonly string[]): Binder[] {
     if (separator < 1) throw new Error(`invalid kernel binding ${entry}`);
     const sourceType = entry.slice(separator + 1).trim();
     if (sourceType === "Type") return [];
-    const binderType = valueType(sourceType);
+    // Propositional atoms are honest kernel binders: `Prop` is displayed, the
+    // predicative `Type 0` is what the kernel checks (there is no impredicative sort).
+    const binderType = sourceType === "Prop" ? type(0) : valueType(sourceType);
     return entry.slice(0, separator).split(",").map((name) => ({ name: name.trim(), type: binderType }));
   });
 }
@@ -260,10 +272,22 @@ function wrapPis(items: readonly Binder[], body: Term): Term {
   return items.reduceRight((result, binder) => pi(binder.name, binder.type, result), body);
 }
 
-function goalById(session: ProofSession, goalId: string): EquationGoal {
+function goalById(session: ProofSession, goalId: string): ProofGoal {
   const found = session.goals.find((goal) => goal.id === goalId)
     ?? session.ancestors.find((goal) => goal.id === goalId);
   if (found === undefined) throw new Error(`unknown proof obligation ${goalId}`);
+  return found;
+}
+
+function equationGoalById(session: ProofSession, goalId: string): EquationGoal {
+  const found = goalById(session, goalId);
+  if (isPropositionGoal(found)) throw new Error(`obligation ${goalId} is not an equation`);
+  return found;
+}
+
+function propositionGoalById(session: ProofSession, goalId: string): PropositionGoal {
+  const found = goalById(session, goalId);
+  if (!isPropositionGoal(found)) throw new Error(`obligation ${goalId} is not a proposition`);
   return found;
 }
 
@@ -333,7 +357,7 @@ function goalTreeProof(session: ProofSession, goal: EquationGoal, environment: E
     wrapPis([...generalized, ...revertedBinders], motiveBody),
   );
   const branchTerms = analysis.branches.map((branch) => {
-    const child = goalById(session, branch.goalId);
+    const child = equationGoalById(session, branch.goalId);
     const fields = branch.fields.map((field) => ({ name: field.name, type: valueType(field.type) }));
     // The kernel recursor always binds an induction hypothesis for every
     // recursive field; for a case analysis the binder is simply unused.
@@ -373,9 +397,141 @@ function goalTreeProof(session: ProofSession, goal: EquationGoal, environment: E
   return proof;
 }
 
+/** The kernel type of a proposition: atoms are context variables of `Type 0`. */
+function propositionTerm(expr: Expr): Term {
+  if (expr.kind === "var") return variable(expr.name);
+  if (expr.name === "imp" && expr.args.length === 2) {
+    return arrow(propositionTerm(expr.args[0]!), propositionTerm(expr.args[1]!));
+  }
+  if (expr.name === "and" && expr.args.length === 2) {
+    return apps(constant("and"), propositionTerm(expr.args[0]!), propositionTerm(expr.args[1]!));
+  }
+  throw new Error(`unsupported proposition ${expr.name}`);
+}
+
+/** Hypothesis names bound by this goal's own intro steps (λ-bound in its proof, not ambient). */
+function introducedNames(goal: PropositionGoal): Set<string> {
+  return new Set(goal.steps
+    .filter((step) => step.reason.startsWith("intro "))
+    .map((step) => step.reason.slice("intro ".length)));
+}
+
+/** The context a proposition goal's proof is checked in: atoms plus the hypotheses present at goal CREATION. */
+function propositionContext(goal: PropositionGoal): Context {
+  const introduced = introducedNames(goal);
+  const context = new Map<string, Term>();
+  for (const binder of binders(goal.context)) context.set(binder.name, binder.type);
+  for (const hypothesis of goal.hypotheses) {
+    if (!introduced.has(hypothesis.name)) context.set(hypothesis.name, propositionTerm(hypothesis.proposition));
+  }
+  return context;
+}
+
+/**
+ * Replays a proposition goal's visible steps: every intro is a λ-binder over
+ * the implication's antecedent, and a final exact names the hypothesis the
+ * goal is closed with. Anything else is rejected.
+ */
+function propositionChain(goal: PropositionGoal): {
+  readonly intros: Binder[];
+  readonly exact?: string;
+  readonly finalProposition: Expr;
+} {
+  let current = goal.steps[0]!.proposition;
+  const intros: Binder[] = [];
+  let exact: string | undefined;
+  for (const step of goal.steps.slice(1)) {
+    if (exact !== undefined) throw new Error("proposition steps continue past exact");
+    if (step.reason.startsWith("intro ")) {
+      if (current.kind === "var" || current.name !== "imp") throw new Error("intro requires an implication goal");
+      if (!expressionEqual(step.proposition, current.args[1]!)) throw new Error("intro does not match the recorded goal");
+      intros.push({ name: step.reason.slice("intro ".length), type: propositionTerm(current.args[0]!) });
+      current = step.proposition;
+      continue;
+    }
+    if (step.reason.startsWith("exact ")) {
+      if (!expressionEqual(step.proposition, current)) throw new Error("exact does not match the recorded goal");
+      const name = step.reason.slice("exact ".length);
+      const witness = goal.hypotheses.find((hypothesis) => hypothesis.name === name);
+      if (witness === undefined || !expressionEqual(witness.proposition, current)) {
+        throw new Error("exact hypothesis does not match the goal");
+      }
+      exact = name;
+      continue;
+    }
+    throw new Error(`cannot reconstruct ${step.reason}`);
+  }
+  return { intros, ...(exact === undefined ? {} : { exact }), finalProposition: current };
+}
+
+function validatePropositionGoal(goal: PropositionGoal, environment: Environment): void {
+  const context = new Map<string, Term>();
+  for (const binder of binders(goal.context)) context.set(binder.name, binder.type);
+  for (const step of goal.steps) check(propositionTerm(step.proposition), type(0), context, environment);
+  propositionChain(goal);
+}
+
+/**
+ * Proof term for a proposition goal-tree node: the goal's own intro steps
+ * become λ-binders around a terminal that is either the exact hypothesis, a
+ * (single-branch) `and` recursor for a destruct — whose branch λ-binds the
+ * two freshened side hypotheses, matching what the child goal shows — or a
+ * `conj` application whose arguments are the split children's proofs.
+ */
+function propositionGoalTreeProof(session: ProofSession, goal: PropositionGoal, environment: Environment): Term {
+  const { intros, exact, finalProposition } = propositionChain(goal);
+  let body: Term;
+  if (goal.analysis?.kind === "destruct") {
+    const hypothesis = goal.hypotheses.find((candidate) => candidate.id === goal.analysis?.hypothesisId);
+    if (hypothesis === undefined || hypothesis.proposition.kind === "var" || hypothesis.proposition.name !== "and") {
+      throw new Error("destruct requires a conjunction hypothesis");
+    }
+    const branch = goal.analysis.branches[0];
+    if (goal.analysis.branches.length !== 1 || branch === undefined) throw new Error("invalid destruct branches");
+    const child = propositionGoalById(session, branch.goalId);
+    const sides = goal.hypotheses.filter((candidate) => candidate.id !== hypothesis.id);
+    const introduced = child.hypotheses.filter((candidate) => !sides.some((survivor) => survivor.id === candidate.id));
+    if (introduced.length !== 2) throw new Error("destruct must introduce exactly two hypotheses");
+    const leftTerm = propositionTerm(hypothesis.proposition.args[0]!);
+    const rightTerm = propositionTerm(hypothesis.proposition.args[1]!);
+    const motive = lambda("__motive_value", apps(constant("and"), leftTerm, rightTerm), propositionTerm(finalProposition));
+    const branchTerm = lambda(introduced[0]!.name, leftTerm,
+      lambda(introduced[1]!.name, rightTerm, propositionGoalTreeProof(session, child, environment)));
+    body = recursor("and", motive, [branchTerm], variable(hypothesis.name), [leftTerm, rightTerm]);
+  } else if (goal.analysis?.kind === "split") {
+    if (finalProposition.kind === "var" || finalProposition.name !== "and" || goal.analysis.branches.length !== 2) {
+      throw new Error("split requires a conjunction goal");
+    }
+    const [first, second] = goal.analysis.branches;
+    body = apps(
+      constant("conj"),
+      propositionTerm(finalProposition.args[0]!),
+      propositionTerm(finalProposition.args[1]!),
+      propositionGoalTreeProof(session, propositionGoalById(session, first!.goalId), environment),
+      propositionGoalTreeProof(session, propositionGoalById(session, second!.goalId), environment),
+    );
+  } else {
+    if (goal.status !== "solved" || exact === undefined) throw new Error(`obligation ${goal.label} is still open`);
+    body = variable(exact);
+  }
+  const proof = intros.reduceRight<Term>((result, binder) => lambda(binder.name, binder.type, result), body);
+  check(proof, propositionTerm(goal.steps[0]!.proposition), propositionContext(goal), environment);
+  return proof;
+}
+
 function theoremCertificate(session: ProofSession, environment: Environment): { readonly type: Term; readonly term: Term } {
   const theoremBinders = binders(session.theoremContext);
   const root = goalById(session, "goal-root");
+  if (isPropositionGoal(root)) {
+    if (session.theoremProposition === undefined) throw new Error("the session does not state a proposition");
+    return {
+      type: wrapPis(theoremBinders, propositionTerm(session.theoremProposition)),
+      term: wrapLambdas(theoremBinders, propositionGoalTreeProof(session, root, environment)),
+    };
+  }
+  if (session.theoremLeft === undefined || session.theoremRight === undefined) {
+    throw new Error("the session does not state an equation");
+  }
   const resultType = valueType(root.type);
   const statement = equal(resultType, expressionTerm(session.theoremLeft), expressionTerm(session.theoremRight));
   return {
@@ -464,9 +620,17 @@ export function checkProofSession(value: unknown): KernelCertificate {
   const session = decodeProofSession(value);
   const environment = touchProofEnvironment();
   assertAxiomFree(environment);
-  for (const goal of [...session.ancestors, ...session.goals]) validateOpenGoal(goal, environment);
+  for (const goal of [...session.ancestors, ...session.goals]) {
+    if (isPropositionGoal(goal)) validatePropositionGoal(goal, environment);
+    else validateOpenGoal(goal, environment);
+  }
   if (session.goals.some((goal) => goal.status !== "solved")) {
-    return { environment, script: session.goals.map((goal) => prettyTerm(equalityType(goal, goal.left, goal.right))).join("\n") };
+    return {
+      environment,
+      script: session.goals.map((goal) => prettyTerm(
+        isPropositionGoal(goal) ? propositionTerm(goal.proposition) : equalityType(goal, goal.left, goal.right),
+      )).join("\n"),
+    };
   }
   const theorem = theoremCertificate(session, environment);
   check(theorem.term, theorem.type, new Map(), environment);

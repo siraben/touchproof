@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeProofSession } from "../../src/proof/protocol.js";
-import { createLessonSession } from "../../src/proof/session.js";
+import { createLessonSession, type EquationGoal } from "../../src/proof/session.js";
 
 describe("proof protocol", () => {
   it("never trusts a client-supplied checked status", () => {
@@ -37,9 +37,10 @@ describe("proof protocol", () => {
     goals[0]!.steps[0]!.equation = "false = true";
     goals[0]!.steps[0]!.reason = "rewrite with ]\n#eval IO.getEnv \"SECRET\"";
     const decoded = decodeProofSession(session);
-    expect(decoded.goals[0]!.context).toEqual(["b : Bool"]);
-    expect(decoded.goals[0]!.type).toBe("Bool");
-    expect(decoded.goals[0]!.steps[0]!.equation).toBe("negb (negb b) = b");
-    expect(decoded.goals[0]!.steps[0]!.reason).toBe("theorem statement");
+    const decodedGoal = decoded.goals[0] as EquationGoal;
+    expect(decodedGoal.context).toEqual(["b : Bool"]);
+    expect(decodedGoal.type).toBe("Bool");
+    expect(decodedGoal.steps[0]!.equation).toBe("negb (negb b) = b");
+    expect(decodedGoal.steps[0]!.reason).toBe("theorem statement");
   });
 });

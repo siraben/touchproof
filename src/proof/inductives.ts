@@ -32,6 +32,15 @@ export const inductiveDefinitions: readonly InductiveDefinition[] = [
       { name: "xs", type: "List A", recursive: true },
     ] },
   ] },
+  // Conjunction. `Prop` is TouchProof's display name for the propositional
+  // universe; in the kernel it is the predicative `Type 0` (there is no
+  // impredicative sort), so `and` is an ordinary parameterized inductive.
+  { name: "and", parameters: ["A : Prop", "B : Prop"], constructors: [
+    { name: "conj", label: "conj a b", fields: [
+      { name: "a", type: "A" },
+      { name: "b", type: "B" },
+    ] },
+  ] },
 ] as const;
 
 export function inductiveByName(name: string): InductiveDefinition | undefined {

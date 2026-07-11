@@ -44,6 +44,10 @@ export {
   lengthRevProof,
   mapLengthProof,
   appendNilRightProof,
+  propIdentityProof,
+  propAndLeftProof,
+  propConstProof,
+  propAndSwapProof,
   verifyLessonProof,
 } from "./proof/standardLibrary.js";
 export {
@@ -59,6 +63,11 @@ export {
   applyProofMove,
   focusGoal,
   markKernelChecked,
+  // Goals are a union: equation goals (left/right) or proposition goals
+  // (a single `proposition` expression over atoms, → and ∧); this is the
+  // discriminator renderers should branch on.
+  isPropositionGoal,
+  freshHypothesisName,
 } from "./proof/session.js";
 export { checkProofSession } from "./proof/certificate.js";
 export type { KernelCertificate } from "./proof/certificate.js";
@@ -69,6 +78,11 @@ export type {
   AnalysisBranch,
   GoalAnalysis,
   EquationGoal,
+  PropositionHypothesis,
+  PropositionStep,
+  PropositionAnalysis,
+  PropositionGoal,
+  ProofGoal,
   ProofStep,
   ProofSession,
   ProofMove,

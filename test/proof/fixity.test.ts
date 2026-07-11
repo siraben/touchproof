@@ -53,6 +53,10 @@ describe("fixity-driven parsing and printing", () => {
     // parentheses override the table
     ["(x :: xs) ++ ys", call("append", [ctor("cons", [programVar("x"), programVar("xs")]), programVar("ys")])],
     ["a + (b + c)", call("add", [programVar("a"), call("add", [programVar("b"), programVar("c")])])],
+    // propositional connectives: → is right-associative at 3, ∧ binds tighter at 4
+    ["a → b → a", call("imp", [programVar("a"), call("imp", [programVar("b"), programVar("a")])])],
+    ["a ∧ b → b ∧ a", call("imp", [call("and", [programVar("a"), programVar("b")]), call("and", [programVar("b"), programVar("a")])])],
+    ["a ∧ b ∧ c", call("and", [programVar("a"), call("and", [programVar("b"), programVar("c")])])],
   ])("parses %s with the declared fixities", (source, expected) => {
     expect(expressionEqual(parseProgramExpr(source), expected)).toBe(true);
   });
@@ -67,6 +71,12 @@ describe("fixity-driven parsing and printing", () => {
     [call("apply", [call("compose", [programVar("f"), programVar("g")]), programVar("x")]), "(f ∘ g) (x)"],
     [call("map", [call("compose", [programVar("f"), programVar("g")]), programVar("xs")]), "map (f ∘ g) xs"],
     [ctor("succ", [call("add", [ctor("zero"), programVar("a")])]), "S (0 + a)"],
+    // implication prints right-associated without parentheses…
+    [call("imp", [programVar("a"), call("imp", [programVar("b"), programVar("a")])]), "a → b → a"],
+    // …and parenthesizes a left-nested antecedent
+    [call("imp", [call("imp", [programVar("a"), programVar("b")]), programVar("a")]), "(a → b) → a"],
+    [call("imp", [call("and", [programVar("a"), programVar("b")]), call("and", [programVar("b"), programVar("a")])]), "a ∧ b → b ∧ a"],
+    [call("and", [call("and", [programVar("a"), programVar("b")]), programVar("c")]), "(a ∧ b) ∧ c"],
   ])("prints with the minimal parentheses the table dictates", (tree, expected) => {
     expect(exprToText(tree)).toBe(expected);
   });

@@ -64,13 +64,65 @@ export interface ProofStep {
   readonly right: Expr;
 }
 
+/**
+ * The propositional layer. A proposition is an `Expr` over a deliberately
+ * small grammar: atoms are context variables declared `P : Prop`, and the
+ * connectives are `imp` (displayed `→`, infixr 3) and `and` (displayed `∧`,
+ * infixr 4) from the fixity table. `Prop` is the DISPLAY name for the
+ * propositional universe; the kernel has no impredicative sort, so atoms are
+ * checked as variables of the predicative `Type 0`.
+ */
+export interface PropositionHypothesis {
+  readonly id: string;
+  readonly name: string;
+  readonly proposition: Expr;
+}
+
+export interface PropositionStep {
+  readonly proposition: Expr;
+  readonly reason: string;
+}
+
+/** Recorded on a proposition goal at the moment it is split by destruct/split. */
+export interface PropositionAnalysis {
+  readonly kind: "destruct" | "split";
+  /** The conjunction hypothesis a destruct consumed (destruct only). */
+  readonly hypothesisId?: string;
+  readonly branches: readonly { readonly goalId: string; readonly label: string }[];
+}
+
+export interface PropositionGoal {
+  readonly id: string;
+  readonly label: string;
+  readonly context: readonly string[];
+  readonly hypotheses: readonly PropositionHypothesis[];
+  /** The statement to prove; there is no equation and no left/right. */
+  readonly proposition: Expr;
+  readonly status: "open" | "solved";
+  readonly steps: readonly PropositionStep[];
+  /** The goal this obligation was split from; absent on the root goal. */
+  readonly parentId?: string;
+  /** Present exactly when this goal has been split by destruct/split. */
+  readonly analysis?: PropositionAnalysis;
+}
+
+/** A proof obligation: an equation between programs, or a proposition. */
+export type ProofGoal = EquationGoal | PropositionGoal;
+
+export function isPropositionGoal(goal: ProofGoal): goal is PropositionGoal {
+  return "proposition" in goal;
+}
+
 export interface ProofSession {
   readonly lessonId: string;
   readonly theorem: string;
   readonly statement: string;
   readonly theoremContext: readonly string[];
-  readonly theoremLeft: Expr;
-  readonly theoremRight: Expr;
+  /** The theorem equation; present exactly on equation lessons. */
+  readonly theoremLeft?: Expr;
+  readonly theoremRight?: Expr;
+  /** The theorem proposition; present exactly on proposition lessons. */
+  readonly theoremProposition?: Expr;
   /** The focused goal's generalized variables (derived from the goal tree; kept for renderers). */
   readonly generalizedVariables: readonly string[];
   readonly definitionNames: readonly string[];
@@ -83,16 +135,16 @@ export interface ProofSession {
     readonly right: string;
   }[]>>;
   /** Goals that have been split, in split order (a parent always precedes its descendants). */
-  readonly ancestors: readonly EquationGoal[];
+  readonly ancestors: readonly ProofGoal[];
   /** The open/solved leaf obligations, in notebook order. */
-  readonly goals: readonly EquationGoal[];
+  readonly goals: readonly ProofGoal[];
   readonly focusedGoalId: string;
   readonly kernelStatus: "pending" | "checked";
 }
 
 export interface ProofMove {
   readonly id: string;
-  readonly kind: "reduce" | "cases" | "induction" | "generalize" | "rewrite" | "close";
+  readonly kind: "reduce" | "cases" | "induction" | "generalize" | "intro" | "rewrite" | "close" | "exact" | "destruct" | "split";
   readonly label: string;
   readonly explanation: string;
   readonly handle: string;
@@ -116,8 +168,44 @@ export interface Lesson {
 
 export const lessonCatalog: readonly Lesson[] = [
   {
+    id: "prop-identity",
+    chapter: "1 · Propositional logic",
+    title: "An assumption is a proof",
+    concept: "Introducing and using a hypothesis",
+    theorem: "P → P",
+    source: "Adapted from Software Foundations, Logical Foundations: Tactics",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Tactics.html",
+  },
+  {
+    id: "prop-and-left",
+    chapter: "2 · Propositional logic",
+    title: "Taking a conjunction apart",
+    concept: "Destructing a conjunction hypothesis",
+    theorem: "P ∧ Q → P",
+    source: "Adapted from Software Foundations, Logical Foundations: Logic",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Logic.html",
+  },
+  {
+    id: "prop-const",
+    chapter: "3 · Propositional logic",
+    title: "Choosing among assumptions",
+    concept: "Nested introductions",
+    theorem: "P → Q → P",
+    source: "Adapted from Software Foundations, Logical Foundations: Tactics",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Tactics.html",
+  },
+  {
+    id: "prop-and-swap",
+    chapter: "4 · Propositional logic",
+    title: "Swapping a conjunction",
+    concept: "Destruct, split, and exact together",
+    theorem: "P ∧ Q → Q ∧ P",
+    source: "Adapted from Software Foundations, Logical Foundations: Logic",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Logic.html",
+  },
+  {
     id: "bool-compute",
-    chapter: "1 · Booleans",
+    chapter: "5 · Booleans",
     title: "Evaluate negation",
     concept: "Definitions compute",
     theorem: "negb false = true",
@@ -126,7 +214,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "bool-involution",
-    chapter: "2 · Booleans",
+    chapter: "6 · Booleans",
     title: "Negating twice",
     concept: "Boolean elimination",
     theorem: "negb (negb b) = b",
@@ -135,7 +223,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "nat-add-example",
-    chapter: "3 · Natural numbers",
+    chapter: "7 · Natural numbers",
     title: "Evaluate addition",
     concept: "Recursive computation",
     theorem: "2 + 1 = 3",
@@ -144,7 +232,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "nat-add-zero",
-    chapter: "4 · Natural numbers",
+    chapter: "8 · Natural numbers",
     title: "Adding zero on the right",
     concept: "Induction on Nat",
     theorem: "n + 0 = n",
@@ -153,7 +241,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "list-append-nil",
-    chapter: "5 · Lists",
+    chapter: "9 · Lists",
     title: "Appending the empty list",
     concept: "Induction on List",
     theorem: "xs ++ [] = xs",
@@ -162,7 +250,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "list-map-append",
-    chapter: "6 · Lists",
+    chapter: "10 · Lists",
     title: "Map distributes over append",
     concept: "Induction with parameters",
     theorem: "map f (xs ++ ys) = map f xs ++ map f ys",
@@ -171,7 +259,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "list-rev-append",
-    chapter: "7 · Lists",
+    chapter: "11 · Lists",
     title: "Reverse an append",
     concept: "Reuse associativity",
     theorem: "rev (xs ++ ys) = rev ys ++ rev xs",
@@ -180,7 +268,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "list-rev-involution",
-    chapter: "8 · Lists",
+    chapter: "12 · Lists",
     title: "Reversing twice",
     concept: "Reuse a proved theorem",
     theorem: "rev (rev xs) = xs",
@@ -189,7 +277,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "list-rev-acc",
-    chapter: "9 · Generalization",
+    chapter: "13 · Generalization",
     title: "Reverse with an accumulator",
     concept: "Generalizing the induction hypothesis",
     theorem: "revAcc xs acc = rev xs ++ acc",
@@ -198,7 +286,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "map-composition",
-    chapter: "10 · Higher-order functions",
+    chapter: "14 · Higher-order functions",
     title: "Map preserves composition",
     concept: "Induction and local rewriting",
     theorem: "map (f ∘ g) l = map f (map g l)",
@@ -207,7 +295,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "nat-add-succ-right",
-    chapter: "11 · Natural numbers",
+    chapter: "15 · Natural numbers",
     title: "Pushing a successor rightward",
     concept: "Induction on the left argument",
     theorem: "n + S m = S (n + m)",
@@ -216,7 +304,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "nat-add-assoc",
-    chapter: "12 · Natural numbers",
+    chapter: "16 · Natural numbers",
     title: "Addition is associative",
     concept: "Nested data, one induction",
     theorem: "(a + b) + c = a + (b + c)",
@@ -225,7 +313,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "nat-add-comm",
-    chapter: "13 · Natural numbers",
+    chapter: "17 · Natural numbers",
     title: "Addition is commutative",
     concept: "Composing proved lemmas",
     theorem: "a + b = b + a",
@@ -234,7 +322,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "list-length-append",
-    chapter: "14 · Lists",
+    chapter: "18 · Lists",
     title: "Length of an append",
     concept: "A list measure meets addition",
     theorem: "length (xs ++ ys) = length xs + length ys",
@@ -243,7 +331,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "list-length-rev",
-    chapter: "15 · Lists",
+    chapter: "19 · Lists",
     title: "Reverse preserves length",
     concept: "Reusing a measure lemma",
     theorem: "length (rev xs) = length xs",
@@ -252,7 +340,7 @@ export const lessonCatalog: readonly Lesson[] = [
   },
   {
     id: "list-map-length",
-    chapter: "16 · Higher-order functions",
+    chapter: "20 · Higher-order functions",
     title: "Map preserves length",
     concept: "Higher-order functions preserve measure",
     theorem: "length (map f xs) = length xs",
@@ -266,7 +354,7 @@ export function equationToText(goal: Pick<EquationGoal, "left" | "right">): stri
 }
 
 
-function focusedGoal(session: ProofSession): EquationGoal {
+function focusedGoal(session: ProofSession): ProofGoal {
   const goal = session.goals.find((candidate) => candidate.id === session.focusedGoalId);
   if (goal === undefined) throw new Error("focused proof obligation does not exist");
   return goal;
@@ -400,9 +488,38 @@ const lessonSpecs: Readonly<Record<string, LessonSpec>> = {
   },
 };
 
+interface PropositionLessonSpec {
+  readonly theorem: string;
+  readonly context: readonly string[];
+  readonly proposition: string;
+}
+
+const propositionLessonSpecs: Readonly<Record<string, PropositionLessonSpec>> = {
+  "prop-identity": { theorem: "imp_id", context: ["P : Prop"], proposition: "P → P" },
+  "prop-and-left": { theorem: "and_left", context: ["P : Prop", "Q : Prop"], proposition: "P ∧ Q → P" },
+  "prop-const": { theorem: "imp_const", context: ["P : Prop", "Q : Prop"], proposition: "P → Q → P" },
+  "prop-and-swap": { theorem: "and_swap", context: ["P : Prop", "Q : Prop"], proposition: "P ∧ Q → Q ∧ P" },
+};
+
 export function createLessonSession(lessonId: string): ProofSession {
-  const spec = lessonSpecs[lessonId];
   const lesson = lessonCatalog.find((candidate) => candidate.id === lessonId);
+  const propositionSpec = propositionLessonSpecs[lessonId];
+  if (propositionSpec !== undefined && lesson !== undefined) {
+    const proposition = parseProgramExpr(propositionSpec.proposition);
+    const goal: PropositionGoal = {
+      id: "goal-root", label: lesson.title, context: propositionSpec.context, hypotheses: [],
+      proposition, status: "open",
+      steps: [{ proposition, reason: "theorem statement" }],
+    };
+    return {
+      lessonId, theorem: propositionSpec.theorem, statement: lesson.theorem,
+      theoremContext: propositionSpec.context, theoremProposition: proposition,
+      definitionNames: [], inductiveNames: ["and"],
+      generalizedVariables: [],
+      ancestors: [], goals: [goal], focusedGoalId: goal.id, kernelStatus: "pending",
+    };
+  }
+  const spec = lessonSpecs[lessonId];
   if (spec === undefined || lesson === undefined) throw new Error(`unknown lesson ${lessonId}`);
   const left = parseProgramExpr(spec.left);
   const right = parseProgramExpr(spec.right);
@@ -441,7 +558,8 @@ export function withDerivedSessionState(session: ProofSession): ProofSession {
       ancestorsChanged = true;
     }
   }
-  const generalizedVariables = session.goals.find((goal) => goal.id === session.focusedGoalId)?.generalized ?? [];
+  const focused = session.goals.find((goal) => goal.id === session.focusedGoalId);
+  const generalizedVariables = focused === undefined || isPropositionGoal(focused) ? [] : focused.generalized;
   const sameGeneralized = generalizedVariables.length === session.generalizedVariables.length
     && generalizedVariables.every((name, index) => session.generalizedVariables[index] === name);
   if (!ancestorsChanged && sameGeneralized) return session;
@@ -452,9 +570,77 @@ export function createMapCompositionSession(): ProofSession {
   return createLessonSession("map-composition");
 }
 
+/**
+ * The deterministic name an intro binds next: `H`, then `H2`, `H3`, …
+ * freshened against the context and every visible hypothesis. The protocol
+ * re-derives intro names through this same function during replay.
+ */
+export function freshHypothesisName(goal: Pick<PropositionGoal, "context" | "hypotheses">, base = "H"): string {
+  const taken = new Set([
+    ...goal.context.flatMap(contextEntryNames),
+    ...goal.hypotheses.map((hypothesis) => hypothesis.name),
+  ]);
+  let name = base;
+  for (let suffix = 2; taken.has(name); suffix += 1) name = `${base}${suffix}`;
+  return name;
+}
+
+/** Proposition moves are purely state-derived, exactly like equation moves. */
+function enumeratePropositionMoves(goal: PropositionGoal): ProofMove[] {
+  const moves: ProofMove[] = [];
+  const proposition = goal.proposition;
+  if (proposition.kind === "call" && proposition.name === "imp") {
+    const name = freshHypothesisName(goal);
+    moves.push({
+      id: "intro",
+      kind: "intro",
+      label: `Introduce ${name} : ${exprToText(proposition.args[0]!)}`,
+      explanation: `Assume the antecedent as hypothesis ${name}; the goal becomes the consequent.`,
+      handle: proposition.args[0]!.id,
+      variable: name,
+    });
+  }
+  if (proposition.kind === "call" && proposition.name === "and") {
+    moves.push({
+      id: "split",
+      kind: "split",
+      label: "Split the conjunction",
+      explanation: "Prove each side of the ∧ as its own obligation.",
+      handle: proposition.id,
+      dropTarget: "analysis-zone",
+    });
+  }
+  for (const hypothesis of goal.hypotheses) {
+    if (hypothesis.proposition.kind === "call" && hypothesis.proposition.name === "and") {
+      moves.push({
+        id: `destruct:${hypothesis.id}`,
+        kind: "destruct",
+        label: `Destruct ${hypothesis.name}`,
+        explanation: `Replace ${hypothesis.name} by one hypothesis for each side of its ∧.`,
+        handle: hypothesis.id,
+        dropTarget: "analysis-zone",
+        hypothesisId: hypothesis.id,
+      });
+    }
+    if (expressionEqual(hypothesis.proposition, proposition)) {
+      moves.push({
+        id: `exact:${hypothesis.id}`,
+        kind: "exact",
+        label: `Exact ${hypothesis.name}`,
+        explanation: "This hypothesis is precisely the goal.",
+        handle: hypothesis.id,
+        dropTarget: proposition.id,
+        hypothesisId: hypothesis.id,
+      });
+    }
+  }
+  return moves;
+}
+
 export function enumerateProofMoves(session: ProofSession): ProofMove[] {
   const goal = focusedGoal(session);
   if (goal.status === "solved") return [];
+  if (isPropositionGoal(goal)) return enumeratePropositionMoves(goal);
   const moves: ProofMove[] = [];
   // Structural moves derive purely from the goal's own state: any context
   // variable of inductive type occurring in the goal may be analyzed, in any
@@ -504,6 +690,23 @@ export function enumerateProofMoves(session: ProofSession): ProofMove[] {
       variable: candidate.name,
     });
   }
+  // Intro is generalize's inverse: it pops the OUTERMOST ∀-binder of the
+  // goal's scope back into the goal context. Only the outermost binder is
+  // offered, so intro and generalize chain freely in both directions.
+  const outermost = goal.generalized[0];
+  if (outermost !== undefined) {
+    const occurrence = [...allExpressions(goal.left), ...allExpressions(goal.right)].find(
+      (expr) => expr.kind === "var" && expr.name === outermost,
+    );
+    moves.push({
+      id: `intro:${outermost}`,
+      kind: "intro",
+      label: `Introduce ${outermost}`,
+      explanation: `Move ${outermost} back out of the ∀ scope into the goal context.`,
+      handle: occurrence?.id ?? goal.id,
+      variable: outermost,
+    });
+  }
   for (const side of ["left", "right"] as const) {
     for (const expression of allExpressions(goal[side])) {
       const reduction = reduceByDefinition(expression);
@@ -551,8 +754,33 @@ export function enumerateProofMoves(session: ProofSession): ProofMove[] {
   return moves;
 }
 
-function updateGoal(session: ProofSession, nextGoal: EquationGoal): ProofSession {
+function updateGoal(session: ProofSession, nextGoal: ProofGoal): ProofSession {
   return { ...session, goals: session.goals.map((goal) => goal.id === nextGoal.id ? nextGoal : goal) };
+}
+
+/** Replaces a leaf with its analysis children in place and freezes the split goal into `ancestors`. */
+function splitLeaf(session: ProofSession, goalId: string, frozen: ProofGoal, children: readonly ProofGoal[]): ProofSession {
+  const position = session.goals.findIndex((candidate) => candidate.id === goalId);
+  if (position < 0) throw new Error("only leaf obligations can be analyzed");
+  return {
+    ...session,
+    ancestors: [...session.ancestors, frozen],
+    goals: [
+      ...session.goals.slice(0, position),
+      ...children,
+      ...session.goals.slice(position + 1),
+    ],
+    focusedGoalId: children[0]!.id,
+  };
+}
+
+/** Notebook position for a fresh analysis child. */
+function childGoalId(goal: ProofGoal, index: number): string {
+  return goal.id === "goal-root" ? `goal-${index}` : `${goal.id}.${index}`;
+}
+
+function childGoalLabel(goal: ProofGoal, branchLabel: string): string {
+  return goal.id === "goal-root" ? branchLabel : `${goal.label} · ${branchLabel}`;
 }
 
 function contextEntryNames(entry: string): string[] {
@@ -668,18 +896,102 @@ function splitGoal(session: ProofSession, goal: EquationGoal, kind: "cases" | "i
     return { child, branch };
   });
   const analysis: GoalAnalysis = { kind, variable: name, type: analyzedType, branches: children.map((entry) => entry.branch) };
-  const position = session.goals.findIndex((candidate) => candidate.id === goal.id);
-  if (position < 0) throw new Error("only leaf obligations can be analyzed");
-  return {
-    ...session,
-    ancestors: [...session.ancestors, { ...goal, analysis }],
-    goals: [
-      ...session.goals.slice(0, position),
-      ...children.map((entry) => entry.child),
-      ...session.goals.slice(position + 1),
+  return splitLeaf(session, goal.id, { ...goal, analysis }, children.map((entry) => entry.child));
+}
+
+/** `destruct H` on `H : A ∧ B`: one child obligation with H replaced by a hypothesis per side. */
+function destructHypothesis(session: ProofSession, goal: PropositionGoal, hypothesisId: string): ProofSession {
+  const hypothesis = goal.hypotheses.find((candidate) => candidate.id === hypothesisId);
+  if (hypothesis === undefined || hypothesis.proposition.kind === "var" || hypothesis.proposition.name !== "and") {
+    throw new Error("destruct requires a conjunction hypothesis");
+  }
+  const [leftProposition, rightProposition] = hypothesis.proposition.args;
+  const survivors = goal.hypotheses.filter((candidate) => candidate.id !== hypothesisId);
+  const withSurvivors = { context: goal.context, hypotheses: survivors };
+  const leftName = freshHypothesisName(withSurvivors, `${hypothesis.name}A`);
+  const rightName = freshHypothesisName(
+    { ...withSurvivors, hypotheses: [...survivors, { id: `hyp-${leftName}`, name: leftName, proposition: leftProposition! }] },
+    `${hypothesis.name}B`,
+  );
+  const label = `${leftName} : ${exprToText(leftProposition!)}, ${rightName} : ${exprToText(rightProposition!)}`;
+  const id = childGoalId(goal, 0);
+  const child: PropositionGoal = {
+    id,
+    label: childGoalLabel(goal, label),
+    context: goal.context,
+    hypotheses: [
+      ...survivors,
+      { id: `hyp-${leftName}`, name: leftName, proposition: leftProposition! },
+      { id: `hyp-${rightName}`, name: rightName, proposition: rightProposition! },
     ],
-    focusedGoalId: children[0]!.child.id,
+    proposition: goal.proposition,
+    status: "open",
+    steps: [{ proposition: goal.proposition, reason: `${label} obligation` }],
+    parentId: goal.id,
   };
+  const analysis: PropositionAnalysis = { kind: "destruct", hypothesisId, branches: [{ goalId: id, label }] };
+  return splitLeaf(session, goal.id, { ...goal, analysis }, [child]);
+}
+
+/** `split` on an `A ∧ B` goal: one child obligation per side of the conjunction. */
+function splitConjunction(session: ProofSession, goal: PropositionGoal): ProofSession {
+  if (goal.proposition.kind === "var" || goal.proposition.name !== "and") {
+    throw new Error("split requires a conjunction goal");
+  }
+  const children = goal.proposition.args.map((proposition, index): PropositionGoal => {
+    const label = exprToText(proposition);
+    return {
+      id: childGoalId(goal, index),
+      label: childGoalLabel(goal, label),
+      context: goal.context,
+      hypotheses: goal.hypotheses,
+      proposition,
+      status: "open",
+      steps: [{ proposition, reason: `${label} obligation` }],
+      parentId: goal.id,
+    };
+  });
+  const analysis: PropositionAnalysis = {
+    kind: "split",
+    branches: children.map((child) => ({ goalId: child.id, label: child.label })),
+  };
+  return splitLeaf(session, goal.id, { ...goal, analysis }, children);
+}
+
+function applyPropositionMove(session: ProofSession, goal: PropositionGoal, move: ProofMove): ProofSession {
+  if (move.kind === "intro") {
+    const proposition = goal.proposition;
+    if (proposition.kind === "var" || proposition.name !== "imp") throw new Error("intro requires an implication goal");
+    const name = freshHypothesisName(goal);
+    const next: PropositionGoal = {
+      ...goal,
+      hypotheses: [...goal.hypotheses, { id: `hyp-${name}`, name, proposition: proposition.args[0]! }],
+      proposition: proposition.args[1]!,
+      steps: [...goal.steps, { proposition: proposition.args[1]!, reason: `intro ${name}` }],
+    };
+    return updateGoal(session, next);
+  }
+  if (move.kind === "exact" && move.hypothesisId !== undefined) {
+    const hypothesis = goal.hypotheses.find((candidate) => candidate.id === move.hypothesisId);
+    if (hypothesis === undefined || !expressionEqual(hypothesis.proposition, goal.proposition)) {
+      throw new Error("exact hypothesis does not match the goal");
+    }
+    const solved: PropositionGoal = {
+      ...goal,
+      status: "solved",
+      steps: [...goal.steps, { proposition: goal.proposition, reason: `exact ${hypothesis.name}` }],
+    };
+    const updated = updateGoal(session, solved);
+    const nextOpen = updated.goals.find((candidate) => candidate.status === "open");
+    return withDerivedSessionState(nextOpen === undefined ? updated : { ...updated, focusedGoalId: nextOpen.id });
+  }
+  if (move.kind === "destruct" && move.hypothesisId !== undefined) {
+    return withDerivedSessionState(destructHypothesis(session, goal, move.hypothesisId));
+  }
+  if (move.kind === "split") {
+    return withDerivedSessionState(splitConjunction(session, goal));
+  }
+  throw new Error(`unsupported proof move ${move.kind}`);
 }
 
 export function applyProofMove(session: ProofSession, moveId: string): ProofSession {
@@ -687,8 +999,16 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
   if (move === undefined) throw new Error(`illegal proof move: ${moveId}`);
   const goal = focusedGoal(session);
 
+  if (isPropositionGoal(goal)) return applyPropositionMove(session, goal, move);
+
   if (move.kind === "generalize" && move.variable !== undefined) {
     return withDerivedSessionState(updateGoal(session, { ...goal, generalized: [...goal.generalized, move.variable] }));
+  }
+
+  // Only the outermost ∀-binder is ever enumerated, so intro pops the head
+  // of the generalized list; the variable itself never left the context.
+  if (move.kind === "intro" && move.variable === goal.generalized[0]) {
+    return withDerivedSessionState(updateGoal(session, { ...goal, generalized: goal.generalized.slice(1) }));
   }
 
   if ((move.kind === "induction" || move.kind === "cases") && move.variable !== undefined && move.analysisType !== undefined) {

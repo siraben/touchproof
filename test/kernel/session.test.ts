@@ -5,6 +5,7 @@ import {
   createMapCompositionSession,
   enumerateProofMoves,
   equationToText,
+  type EquationGoal,
 } from "../../src/proof/session.js";
 import { checkProofSession } from "../../src/proof/certificate.js";
 
@@ -29,7 +30,7 @@ function reduceUntilReflexive(session: ReturnType<typeof createMapCompositionSes
       current = applyProofMove(current, rewrite.id);
       continue;
     }
-    throw new Error(`proof stuck at ${equationToText(current.goals.find((goal) => goal.id === current.focusedGoalId)!)}`);
+    throw new Error(`proof stuck at ${equationToText(current.goals.find((goal) => goal.id === current.focusedGoalId) as EquationGoal)}`);
   }
   throw new Error("proof exceeded the test step limit");
 }
@@ -39,7 +40,7 @@ describe("visual proof session", () => {
     const session = createMapCompositionSession();
     expect(enumerateProofMoves(session).filter((move) => move.variable === "l").map((move) => move.kind))
       .toEqual(["induction", "cases", "generalize"]);
-    expect(equationToText(session.goals[0]!)).toBe("map (f ∘ g) l = map f (map g l)");
+    expect(equationToText(session.goals[0] as EquationGoal)).toBe("map (f ∘ g) l = map f (map g l)");
   });
 
   it("generalizes an accumulator into the induction hypothesis scope", () => {
@@ -53,7 +54,7 @@ describe("visual proof session", () => {
 
     let strong = applyProofMove(createLessonSession("list-rev-acc"), "generalize:acc");
     strong = applyProofMove(strong, "induction:xs");
-    expect(strong.goals[1]?.hypotheses.find((hypothesis) => hypothesis.name === "IH")?.binders)
+    expect((strong.goals[1] as EquationGoal).hypotheses.find((hypothesis) => hypothesis.name === "IH")?.binders)
       .toEqual([{ name: "acc", type: "List A" }]);
     while (strong.goals.some((goal) => goal.status === "open")) strong = reduceUntilReflexive(strong);
     expect(checkProofSession(strong).theoremTerm).toBeDefined();
@@ -64,8 +65,8 @@ describe("visual proof session", () => {
     session = applyFirst(session, (id) => id === "induction:l");
     expect(session.goals.map((goal) => goal.label)).toEqual(["empty list", "x :: xs"]);
     expect(session.focusedGoalId).toBe("goal-0");
-    expect(equationToText(session.goals[1]!)).toContain("map (f ∘ g) (x :: xs)");
-    expect(equationToText(session.goals[1]!)).toContain("map f (map g (x :: xs))");
+    expect(equationToText(session.goals[1] as EquationGoal)).toContain("map (f ∘ g) (x :: xs)");
+    expect(equationToText(session.goals[1] as EquationGoal)).toContain("map f (map g (x :: xs))");
 
     session = reduceUntilReflexive(session);
     expect(session.goals[0]?.status).toBe("solved");

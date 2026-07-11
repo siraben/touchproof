@@ -1,4 +1,4 @@
-import { check, checkDeclaration, declareInductive, emptyEnvironment, type DefinitionInput, type Environment } from "../kernel/checker.js";
+import { check, checkDeclaration, declareInductive, declareParameterizedInductive, emptyEnvironment, type DefinitionInput, type Environment } from "../kernel/checker.js";
 import {
   app,
   apps,
@@ -37,6 +37,15 @@ export function touchProofEnvironment(): Environment {
   env = declareInductive("List", [
     { name: "nil", fields: [] },
     { name: "cons", fields: [{ name: "head", type: c("Elem") }, { name: "tail", type: c("List") }] },
+  ], env);
+  // Conjunction over the propositional universe. TouchProof displays that
+  // universe as `Prop`, but the kernel is predicative: `Prop` IS `Type 0`,
+  // and `and` is an ordinary parameterized inductive with one constructor.
+  env = declareParameterizedInductive("and", [
+    { name: "A", type: type(0) },
+    { name: "B", type: type(0) },
+  ], [
+    { name: "conj", fields: [{ name: "a", type: v("A") }, { name: "b", type: v("B") }] },
   ], env);
 
   const boolMotive = lambda("_", c("Bool"), c("Bool"));
@@ -959,9 +968,60 @@ export function revInvolutionProof(): { readonly type: Term; readonly term: Term
   };
 }
 
+/**
+ * The propositional opening lessons as hand-assembled λ-terms. Propositions
+ * quantify over the predicative `Type 0` (displayed as Prop); implication is
+ * Π, conjunction is the `and` inductive, and no axioms are involved.
+ */
+export function propIdentityProof(): { readonly type: Term; readonly term: Term } {
+  const P = v("P");
+  return {
+    type: pi("P", type(0), arrow(P, P)),
+    term: lambda("P", type(0), lambda("h", P, v("h"))),
+  };
+}
+
+export function propAndLeftProof(): { readonly type: Term; readonly term: Term } {
+  const P = v("P");
+  const Q = v("Q");
+  const andPQ = apps(c("and"), P, Q);
+  return {
+    type: pis([["P", type(0)], ["Q", type(0)]], arrow(andPQ, P)),
+    term: lambda("P", type(0), lambda("Q", type(0), lambda("h", andPQ,
+      recursor("and", lambda("_", andPQ, P), [lambda("a", P, lambda("b", Q, v("a")))], v("h"), [P, Q])))),
+  };
+}
+
+export function propConstProof(): { readonly type: Term; readonly term: Term } {
+  const P = v("P");
+  const Q = v("Q");
+  return {
+    type: pis([["P", type(0)], ["Q", type(0)]], arrow(P, arrow(Q, P))),
+    term: lambda("P", type(0), lambda("Q", type(0), lambda("h", P, lambda("h2", Q, v("h"))))),
+  };
+}
+
+export function propAndSwapProof(): { readonly type: Term; readonly term: Term } {
+  const P = v("P");
+  const Q = v("Q");
+  const andPQ = apps(c("and"), P, Q);
+  const andQP = apps(c("and"), Q, P);
+  return {
+    type: pis([["P", type(0)], ["Q", type(0)]], arrow(andPQ, andQP)),
+    term: lambda("P", type(0), lambda("Q", type(0), lambda("h", andPQ,
+      recursor("and", lambda("_", andPQ, andQP), [
+        lambda("a", P, lambda("b", Q, apps(c("conj"), Q, P, v("b"), v("a")))),
+      ], v("h"), [P, Q])))),
+  };
+}
+
 export function verifyLessonProof(lessonId: string): void {
   const environment = touchProofEnvironment();
   const builders: Readonly<Record<string, () => { readonly type: Term; readonly term: Term }>> = {
+    "prop-identity": propIdentityProof,
+    "prop-and-left": propAndLeftProof,
+    "prop-const": propConstProof,
+    "prop-and-swap": propAndSwapProof,
     "bool-compute": booleanComputationProof,
     "bool-involution": booleanInvolutionProof,
     "nat-add-example": natAdditionExampleProof,

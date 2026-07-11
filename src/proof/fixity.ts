@@ -37,12 +37,18 @@ export const infixr = (precedence: number, symbol: string, name: string, spacing
  * `::` and `++` share level 5 and associate right (so `x :: xs ++ ys` is
  * `x :: (xs ++ ys)`, and `(x :: xs) ++ ys` needs its parentheses), `+` is
  * `infixl 6`, and composition binds tightest at `infixr 9`.
+ *
+ * The propositional connectives sit BELOW every value-level operator:
+ * conjunction is `infixr 4` and implication `infixr 3`, so `P ∧ Q → Q ∧ P`
+ * and `P → Q → P` both read without parentheses, exactly as in Coq/Lean.
  */
 export const operatorTable: readonly OperatorFixity[] = [
   infixl(6, "+", "add"),
   infixr(5, "++", "append"),
   infixr(5, "::", "cons"),
   infixr(9, "∘", "compose"),
+  infixr(4, "∧", "and"),
+  infixr(3, "→", "imp"),
 ] as const;
 
 /** Looks an operator up by its surface spelling. */

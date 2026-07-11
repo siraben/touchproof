@@ -4,13 +4,19 @@ import { inductiveDefinitions } from "./inductives.js";
 import {
   applyProofMove,
   createLessonSession,
+  freshHypothesisName,
   instantiateHypothesis,
+  isPropositionGoal,
   lessonCatalog,
   withDerivedSessionState,
   type EquationGoal,
   type Hypothesis,
+  type ProofGoal,
   type ProofSession,
   type ProofStep,
+  type PropositionGoal,
+  type PropositionHypothesis,
+  type PropositionStep,
 } from "./session.js";
 
 /**
@@ -54,6 +60,55 @@ function expression(value: unknown, depth = 0): Expr | undefined {
   const args = item["args"].map((child) => expression(child, depth + 1));
   if (args.some((child) => child === undefined)) return undefined;
   return { id: item["id"], kind: item["kind"], name: item["name"], args: args as Expr[] };
+}
+
+/**
+ * The proposition grammar at the trust boundary: atoms (variables) and the
+ * binary connectives `and` / `imp`, nothing else. Program calls and
+ * constructors are NOT propositions.
+ */
+function propositionExpression(value: unknown, depth = 0): Expr | undefined {
+  if (depth > 16) return undefined;
+  const item = record(value);
+  if (item === undefined || typeof item["id"] !== "string" || typeof item["name"] !== "string" || !IDENTIFIER.test(item["name"])) return undefined;
+  if (item["kind"] === "var") return { id: item["id"], kind: "var", name: item["name"] };
+  if (item["kind"] !== "call" || (item["name"] !== "and" && item["name"] !== "imp")
+    || !Array.isArray(item["args"]) || item["args"].length !== 2) return undefined;
+  const args = item["args"].map((child) => propositionExpression(child, depth + 1));
+  if (args.some((child) => child === undefined)) return undefined;
+  return { id: item["id"], kind: "call", name: item["name"], args: args as Expr[] };
+}
+
+function propositionHypothesis(value: unknown): PropositionHypothesis | undefined {
+  const item = record(value);
+  const proposition = propositionExpression(item?.["proposition"]);
+  return item !== undefined && typeof item["id"] === "string" && typeof item["name"] === "string" && proposition !== undefined
+    ? { id: item["id"], name: item["name"], proposition }
+    : undefined;
+}
+
+function propositionStep(value: unknown): PropositionStep | undefined {
+  const item = record(value);
+  const proposition = propositionExpression(item?.["proposition"]);
+  return item !== undefined && typeof item["reason"] === "string" && proposition !== undefined
+    ? { proposition, reason: item["reason"] }
+    : undefined;
+}
+
+function propositionGoal(value: unknown): PropositionGoal | undefined {
+  const item = record(value);
+  const context = stringArray(item?.["context"]);
+  const proposition = propositionExpression(item?.["proposition"]);
+  if (item === undefined || typeof item["id"] !== "string" || typeof item["label"] !== "string"
+    || (item["status"] !== "open" && item["status"] !== "solved") || context === undefined || proposition === undefined
+    || !Array.isArray(item["hypotheses"]) || item["hypotheses"].length > 16 || !Array.isArray(item["steps"]) || item["steps"].length > 32) return undefined;
+  const hypotheses = item["hypotheses"].map(propositionHypothesis);
+  const steps = item["steps"].map(propositionStep);
+  if (hypotheses.some((entry) => entry === undefined) || steps.length === 0 || steps.some((entry) => entry === undefined)) return undefined;
+  return {
+    id: item["id"], label: item["label"], context,
+    hypotheses: hypotheses as PropositionHypothesis[], proposition, status: item["status"], steps: steps as PropositionStep[],
+  };
 }
 
 function hypothesis(value: unknown): Hypothesis | undefined {
@@ -168,6 +223,56 @@ function normalizeGoal(candidate: EquationGoal, template: EquationGoal): Equatio
   };
 }
 
+function hasUniquePropositionIds(proposition: Expr): boolean {
+  const ids = allExpressions(proposition).map((entry) => entry.id);
+  return new Set(ids).size === ids.length;
+}
+
+/**
+ * Replays a proposition goal's recorded history against the trusted
+ * template: every transition must be an enumerated move (an intro on an
+ * implication, or a final exact whose witness exists). Reasons, hypothesis
+ * lists, and intro names are RE-DERIVED, never trusted.
+ */
+function normalizePropositionGoal(candidate: PropositionGoal, template: PropositionGoal): PropositionGoal {
+  const first = candidate.steps[0];
+  if (first === undefined || !expressionEqual(first.proposition, template.proposition)) {
+    throw new Error("proof history has an invalid starting point");
+  }
+  if (!hasUniquePropositionIds(first.proposition)) throw new Error("proof history contains duplicate expression ids");
+  const steps: PropositionStep[] = [{ proposition: first.proposition, reason: template.steps[0]!.reason }];
+  let hypotheses: PropositionHypothesis[] = [...template.hypotheses];
+  let current = first.proposition;
+  for (let index = 1; index < candidate.steps.length; index += 1) {
+    const next = candidate.steps[index]!;
+    if (!hasUniquePropositionIds(next.proposition)) throw new Error("proof history contains duplicate expression ids");
+    if (current.kind !== "var" && current.name === "imp" && expressionEqual(next.proposition, current.args[1]!)) {
+      const name = freshHypothesisName({ context: template.context, hypotheses });
+      hypotheses = [...hypotheses, { id: `hyp-${name}`, name, proposition: current.args[0]! }];
+      steps.push({ proposition: next.proposition, reason: `intro ${name}` });
+      current = next.proposition;
+      continue;
+    }
+    if (expressionEqual(next.proposition, current) && index === candidate.steps.length - 1 && candidate.status === "solved") {
+      const witness = hypotheses.find((entry) => expressionEqual(entry.proposition, current));
+      if (witness === undefined) throw new Error("proof history contains a non-enumerated transition");
+      steps.push({ proposition: next.proposition, reason: `exact ${witness.name}` });
+      continue;
+    }
+    throw new Error("proof history contains an invalid transition");
+  }
+  if (!expressionEqual(candidate.proposition, steps.at(-1)!.proposition)) throw new Error("proof state does not match its history");
+  if (candidate.status === "solved" && !steps.at(-1)!.reason.startsWith("exact ")) throw new Error("a solved proposition must end with exact");
+  return {
+    ...candidate,
+    label: template.label,
+    context: template.context,
+    hypotheses,
+    steps,
+    ...(template.parentId === undefined ? {} : { parentId: template.parentId }),
+  };
+}
+
 function generalizedList(value: unknown, context: readonly string[]): readonly string[] {
   const names = stringArray(value ?? [], 8);
   if (names === undefined) throw new Error("invalid generalized variables");
@@ -181,11 +286,32 @@ function generalizedList(value: unknown, context: readonly string[]): readonly s
   return names;
 }
 
-function analysisPayload(value: unknown): { readonly kind: "cases" | "induction"; readonly variable: string } {
+/** The move id a recorded analysis replays through; the move engine decides its legality. */
+function analysisMoveId(value: unknown, template: ProofGoal): string {
   const item = record(value);
+  if (isPropositionGoal(template)) {
+    if (item?.["kind"] === "split") return "split";
+    if (item?.["kind"] === "destruct" && typeof item["hypothesisId"] === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(item["hypothesisId"])) {
+      return `destruct:${item["hypothesisId"]}`;
+    }
+    throw new Error("invalid proof analysis");
+  }
   if ((item?.["kind"] !== "cases" && item?.["kind"] !== "induction")
     || typeof item["variable"] !== "string" || !IDENTIFIER.test(item["variable"])) throw new Error("invalid proof analysis");
-  return { kind: item["kind"], variable: item["variable"] };
+  return `${item["kind"]}:${item["variable"]}`;
+}
+
+/** Validates a leaf/ancestor payload against its trusted template, dispatching on the goal's shape. */
+function normalizeAgainstTemplate(raw: Record<string, unknown>, template: ProofGoal, forceOpen: boolean): ProofGoal {
+  if (isPropositionGoal(template)) {
+    const candidate = propositionGoal(raw);
+    if (candidate === undefined) throw new Error("invalid proof state");
+    return normalizePropositionGoal(forceOpen ? { ...candidate, status: "open" } : candidate, template);
+  }
+  const candidate = goal(raw);
+  if (candidate === undefined) throw new Error("invalid proof state");
+  const generalized = generalizedList(raw["generalized"], template.context);
+  return { ...normalizeGoal(forceOpen ? { ...candidate, status: "open" } : candidate, template), generalized };
 }
 
 function decode(value: unknown, preserveServerStatus: boolean): ProofSession {
@@ -196,45 +322,42 @@ function decode(value: unknown, preserveServerStatus: boolean): ProofSession {
   const theoremContext = stringArray(item["theoremContext"]);
   const definitionNames = stringArray(item["definitionNames"]);
   const inductiveNames = stringArray(item["inductiveNames"]);
-  const theoremLeft = expression(item["theoremLeft"]);
-  const theoremRight = expression(item["theoremRight"]);
-  if (theoremContext === undefined || definitionNames === undefined || inductiveNames === undefined || theoremLeft === undefined || theoremRight === undefined
+  if (theoremContext === undefined || definitionNames === undefined || inductiveNames === undefined
     || !Array.isArray(item["goals"]) || item["goals"].length === 0 || item["goals"].length > GOAL_LIMIT) throw new Error("invalid proof state");
   const rawAncestors = item["ancestors"] ?? [];
   if (!Array.isArray(rawAncestors) || rawAncestors.length > ANCESTOR_LIMIT) throw new Error("invalid proof state");
 
   // Replay every recorded split through the move engine, parent before child.
   let trusted = createLessonSession(item["lessonId"]);
+  if (trusted.theoremProposition === undefined) {
+    if (expression(item["theoremLeft"]) === undefined || expression(item["theoremRight"]) === undefined) throw new Error("invalid proof state");
+  } else if (propositionExpression(item["theoremProposition"]) === undefined) throw new Error("invalid proof state");
   for (const rawAncestor of rawAncestors) {
     const ancestorRecord = record(rawAncestor);
-    const candidate = ancestorRecord === undefined ? undefined : goal(rawAncestor);
-    if (candidate === undefined) throw new Error("invalid proof state");
-    const analysis = analysisPayload(ancestorRecord!["analysis"]);
-    const template = trusted.goals.find((entry) => entry.id === candidate.id);
+    if (ancestorRecord === undefined || typeof ancestorRecord["id"] !== "string") throw new Error("invalid proof state");
+    const template = trusted.goals.find((entry) => entry.id === ancestorRecord["id"]);
     if (template === undefined) throw new Error("proof state has an invalid branch set");
-    const generalized = generalizedList(ancestorRecord!["generalized"], template.context);
-    const normalized = { ...normalizeGoal({ ...candidate, status: "open" }, template), generalized };
+    const normalized = normalizeAgainstTemplate(ancestorRecord, template, true);
+    const moveId = analysisMoveId(ancestorRecord["analysis"], template);
     trusted = {
       ...trusted,
-      goals: trusted.goals.map((entry) => entry.id === candidate.id ? normalized : entry),
-      focusedGoalId: candidate.id,
+      goals: trusted.goals.map((entry) => entry.id === normalized.id ? normalized : entry),
+      focusedGoalId: normalized.id,
     };
-    trusted = applyProofMove(trusted, `${analysis.kind}:${analysis.variable}`);
+    trusted = applyProofMove(trusted, moveId);
   }
 
   const leafPayloads = item["goals"].map((rawGoal) => {
-    const candidate = goal(rawGoal);
     const raw = record(rawGoal);
-    if (candidate === undefined || raw === undefined) throw new Error("invalid proof state");
-    return { candidate, raw };
+    if (raw === undefined || typeof raw["id"] !== "string") throw new Error("invalid proof state");
+    return raw;
   });
-  if (new Set(leafPayloads.map((entry) => entry.candidate.id)).size !== leafPayloads.length) throw new Error("proof state contains duplicate goals");
+  if (new Set(leafPayloads.map((entry) => entry["id"])).size !== leafPayloads.length) throw new Error("proof state contains duplicate goals");
   if (leafPayloads.length !== trusted.goals.length) throw new Error("proof state has an invalid branch set");
   const normalized = trusted.goals.map((template) => {
-    const payload = leafPayloads.find((entry) => entry.candidate.id === template.id);
+    const payload = leafPayloads.find((entry) => entry["id"] === template.id);
     if (payload === undefined) throw new Error("proof state has an unknown goal");
-    const generalized = generalizedList(payload.raw["generalized"], template.context);
-    return { ...normalizeGoal(payload.candidate, template), generalized };
+    return normalizeAgainstTemplate(payload, template, false);
   });
   if (!normalized.some((entry) => entry.id === item["focusedGoalId"])) throw new Error("invalid proof state");
   if (preserveServerStatus && item["kernelStatus"] === "checked" && normalized.some((entry) => entry.status !== "solved")) {
