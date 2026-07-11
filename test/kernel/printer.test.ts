@@ -58,11 +58,14 @@ describe("curried application printing", () => {
       session = applyProofMove(session, move.id);
     }
     const certificate = checkProofSession(session);
-    // Curried, not pair-nested: the statement head reads like Gallina.
-    expect(certificate.script).toContain("map (compose f g)");
-    expect(certificate.script).not.toContain("((map f)");
+    // Curried, not pair-nested: the statement head reads like Gallina. The
+    // theorem is now polymorphic, so the element types thread through the
+    // spine (`map A C (compose A B C f g) l`), but the layout is unchanged.
+    expect(certificate.script).toContain("map A C (compose A B C f g) l");
+    expect(certificate.script).not.toContain("((map A B");
     // Fill density: several spine arguments share the head's line instead of
-    // one argument per line.
-    expect(certificate.script).toContain("eq_trans List (map (compose f g) l) (map (compose f g) l)");
+    // one argument per line. `eq_trans` carries the applied `List C` equality
+    // type and the polymorphic map term on the same line.
+    expect(certificate.script).toContain("eq_trans (List C) (map A C (compose A B C f g) l)");
   });
 });

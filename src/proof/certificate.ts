@@ -20,6 +20,13 @@ import { inductiveByName } from "./inductives.js";
 import { decodeProofSession } from "./protocol.js";
 import { touchProofEnvironment } from "./standardLibrary.js";
 import {
+  contextTypeVariables,
+  contextTypes,
+  expressionElaborator,
+  type ExpressionElaborator,
+} from "./elaborate.js";
+import { elaborateType, elaborateTypeSource, listElementType, parseTypeExpr, typeExprToString, type TypeExpr } from "./types.js";
+import {
   instantiateHypothesis,
   isPropositionGoal,
   type EquationGoal,
@@ -40,57 +47,130 @@ const lemmaNames: Readonly<Record<string, string>> = {
   length_append: "length_append",
 };
 
-function valueType(source: string): Term {
-  if (source === "Bool") return constant("Bool");
-  if (source === "Nat") return constant("Nat");
-  if (source.startsWith("List")) return constant("List");
-  if (source.includes("→")) return arrow(constant("Elem"), constant("Elem"));
-  return constant("Elem");
-}
-
 interface Binder {
   readonly name: string;
   readonly type: Term;
 }
 
+/**
+ * The kernel binders a source context induces — now WITHOUT erasure. A
+ * `Type`/`Prop` binder becomes an honest `Type 0` binder (there is no
+ * impredicative sort); every value binder is elaborated against the type
+ * variables the context declares, so `A : Type, xs : List A` yields
+ * `A : Type 0, xs : List A` rather than a dropped `A` and a monomorphic list.
+ */
 function binders(entries: readonly string[]): Binder[] {
+  const typeVars = contextTypeVariables(entries);
   return entries.flatMap((entry) => {
     const separator = entry.indexOf(":");
     if (separator < 1) throw new Error(`invalid kernel binding ${entry}`);
     const sourceType = entry.slice(separator + 1).trim();
-    if (sourceType === "Type") return [];
-    // Propositional atoms are honest kernel binders: `Prop` is displayed, the
-    // predicative `Type 0` is what the kernel checks (there is no impredicative sort).
-    const binderType = sourceType === "Prop" ? type(0) : valueType(sourceType);
+    const binderType = sourceType === "Type" || sourceType === "Prop"
+      ? type(0)
+      : elaborateTypeSource(sourceType, typeVars);
     return entry.slice(0, separator).split(",").map((name) => ({ name: name.trim(), type: binderType }));
   });
 }
 
-function expressionTerm(expr: Expr, targetId?: string, replacement?: Term): Term {
-  if (targetId !== undefined && expr.id === targetId) {
-    if (replacement === undefined) throw new Error("a replacement term is required");
-    return replacement;
+/** The source type string a context assigns a program variable. */
+function contextTypeSource(context: readonly string[], name: string): string {
+  for (const entry of context) {
+    const separator = entry.indexOf(":");
+    if (separator < 1) continue;
+    const names = entry.slice(0, separator).split(",").map((item) => item.trim());
+    if (names.includes(name)) return entry.slice(separator + 1).trim();
   }
-  if (expr.kind === "var") return variable(expr.name);
-  const args = expr.args.map((argument) => expressionTerm(argument, targetId, replacement));
-  if (expr.kind === "call" && expr.name === "apply") {
-    if (args.length !== 2) throw new Error("apply has the wrong arity");
-    return app(args[0]!, args[1]!);
+  throw new Error(`variable ${name} is not in the goal context`);
+}
+
+/** The type parameters a recursor on a value of source type `source` requires (`List A ↦ [A]`, else none). */
+function recursorTypeParameters(source: string, typeVars: ReadonlySet<string>): readonly Term[] {
+  const element = listElementType(parseTypeExpr(source));
+  return element === undefined ? [] : [elaborateType(element, typeVars)];
+}
+
+/**
+ * A goal's typed elaboration scope: the type variables it declares, the types
+ * of its program variables (context binders plus any extra binders threaded in
+ * by the motive), and the kernel result type of its equation. Every program
+ * expression is elaborated through this scope so polymorphic constants receive
+ * their explicit type arguments.
+ */
+interface GoalScope {
+  readonly elaborator: ExpressionElaborator;
+  readonly resultType: Term;
+  readonly resultTypeExpr: TypeExpr;
+  /** The kernel term of a WHOLE equation side, elaborated with the result type expected (so bare `nil` types). */
+  readonly side: (expr: Expr) => Term;
+  /** The source element/value type of an expression, as a kernel term. */
+  readonly kernelTypeOf: (expr: Expr) => Term;
+}
+
+/**
+ * The lesson-wide ambient list element: the element type of the first
+ * `List _` variable in the theorem context (the induction variable's element).
+ * A bare `nil` that a case split left with no list variable in scope resolves
+ * to this. Set once per `checkProofSession` call; the pipeline is synchronous.
+ */
+let ambientListElementSource: string | undefined;
+
+function goalScope(
+  context: readonly string[],
+  resultTypeSource: string,
+  extraVars: ReadonlyMap<string, string> = new Map(),
+): GoalScope {
+  const typeVars = contextTypeVariables(context);
+  const varTypes = contextTypes(context);
+  for (const [name, source] of extraVars) varTypes.set(name, parseTypeExpr(source));
+  const elaborator = expressionElaborator(
+    varTypes,
+    typeVars,
+    undefined,
+    ambientListElementSource === undefined ? undefined : parseTypeExpr(ambientListElementSource),
+  );
+  const resultTypeExpr = parseTypeExpr(resultTypeSource);
+  return {
+    elaborator,
+    resultType: elaborateType(resultTypeExpr, typeVars),
+    resultTypeExpr,
+    side: (expr) => elaborator.term(expr, resultTypeExpr),
+    kernelTypeOf: (expr) => elaborator.kernelType(elaborator.typeOf(expr)),
+  };
+}
+
+/** The lesson-wide ambient list element source: the element of the first `List _` context entry. */
+function firstListElementSource(context: readonly string[]): string | undefined {
+  for (const entry of context) {
+    const separator = entry.indexOf(":");
+    if (separator < 1) continue;
+    const element = listElementType(parseTypeExpr(entry.slice(separator + 1).trim()));
+    if (element !== undefined) return typeExprToString(element);
   }
-  return apps(constant(expr.name), ...args);
+  return undefined;
+}
+
+/** Elaborate an equation into a kernel equality type in the goal's scope. */
+function equalityTypeIn(scope: GoalScope, left: Expr, right: Expr): Term {
+  return equal(scope.resultType, scope.side(left), scope.side(right));
 }
 
 function equalityType(goal: EquationGoal, left: Expr, right: Expr): Term {
-  return equal(valueType(goal.type), expressionTerm(left), expressionTerm(right));
+  return equalityTypeIn(goalScope(goal.context, goal.type), left, right);
 }
 
 function localContext(goal: EquationGoal): Context {
+  const scope = goalScope(goal.context, goal.type);
   const context = new Map<string, Term>();
   for (const binder of binders(goal.context)) context.set(binder.name, binder.type);
+  const typeVars = contextTypeVariables(goal.context);
   for (const hypothesis of goal.hypotheses) {
-    const proposition = equalityType(goal, hypothesis.left, hypothesis.right);
+    // A hypothesis' own generalized binders extend BOTH the kernel context and
+    // the program-variable scope its equation is elaborated in.
+    const binderVars = new Map((hypothesis.binders ?? []).map((binder) => [binder.name, binder.type] as const));
+    const hypothesisScope = binderVars.size === 0 ? scope : goalScope(goal.context, goal.type, binderVars);
+    const proposition = equalityTypeIn(hypothesisScope, hypothesis.left, hypothesis.right);
     const hypothesisType = (hypothesis.binders ?? []).reduceRight(
-      (result, binder) => pi(binder.name, valueType(binder.type), result),
+      (result, binder) => pi(binder.name, elaborateTypeSource(binder.type, typeVars), result),
       proposition,
     );
     context.set(hypothesis.name, hypothesisType);
@@ -106,78 +186,101 @@ function trans(type: Term, left: Term, middle: Term, right: Term, first: Term, s
   return apps(constant("eq_trans"), type, left, middle, right, first, second);
 }
 
-function congr(type: Term, fn: Term, left: Term, right: Term, proof: Term): Term {
-  return apps(constant("congr_arg"), type, type, fn, left, right, proof);
+function congr(domainType: Term, codomainType: Term, fn: Term, left: Term, right: Term, proof: Term): Term {
+  return apps(constant("congr_arg"), domainType, codomainType, fn, left, right, proof);
 }
 
-function hypothesisProof(hypothesis: Hypothesis): Term {
+/** The kernel element type of a List-typed program expression, for instantiating a polymorphic lemma. */
+function listElementTerm(scope: GoalScope, expr: Expr): Term {
+  const element = scope.elaborator.listElementOf(expr);
+  if (element === undefined) throw new Error(`expected a List-typed expression for ${expr.kind}`);
+  return element;
+}
+
+function hypothesisProof(hypothesis: Hypothesis, scope: GoalScope): Term {
+  const term = scope.elaborator.term;
   if (hypothesis.id.startsWith("ih-")) return variable(hypothesis.name);
   if (hypothesis.name === "append_nil" && hypothesis.left.kind === "call") {
-    return app(constant("append_nil_right"), expressionTerm(hypothesis.left.args[0]!));
+    // append_nil : Π A, append A xs (nil A) = xs
+    return apps(constant("append_nil_right"), listElementTerm(scope, hypothesis.left), term(hypothesis.left.args[0]!));
   }
   if (hypothesis.name === "append_assoc" && hypothesis.left.kind === "call") {
     const nested = hypothesis.left.args[0];
     if (nested?.kind === "call") {
       return apps(
         constant("append_assoc"),
-        expressionTerm(nested.args[0]!),
-        expressionTerm(nested.args[1]!),
-        expressionTerm(hypothesis.left.args[1]!),
+        listElementTerm(scope, hypothesis.left),
+        term(nested.args[0]!),
+        term(nested.args[1]!),
+        term(hypothesis.left.args[1]!),
       );
     }
   }
   if (hypothesis.name === "rev_append" && hypothesis.left.kind === "call") {
     const appended = hypothesis.left.args[0];
     if (appended?.kind === "call") {
-      return apps(constant("rev_append"), expressionTerm(appended.args[0]!), expressionTerm(appended.args[1]!));
+      // rev_append : Π A xs ys, rev A (append A xs ys) = append A (rev A ys) (rev A xs)
+      return apps(constant("rev_append"), listElementTerm(scope, appended), term(appended.args[0]!), term(appended.args[1]!));
     }
   }
   // add_zero_right (n)     from  add(n, zero) = n
   // add_one_right (n)      from  add(n, succ(zero)) = succ(n)
   if ((hypothesis.name === "add_zero_right" || hypothesis.name === "add_one_right") && hypothesis.left.kind === "call") {
-    return app(constant(hypothesis.name), expressionTerm(hypothesis.left.args[0]!));
+    return app(constant(hypothesis.name), term(hypothesis.left.args[0]!));
   }
   // add_succ_right (m) (n)  from  add(m, succ(n)) = succ(add(m, n))
   if (hypothesis.name === "add_succ_right" && hypothesis.left.kind === "call") {
     const successor = hypothesis.left.args[1];
     if (successor?.kind === "ctor") {
-      return apps(constant("add_succ_right"), expressionTerm(hypothesis.left.args[0]!), expressionTerm(successor.args[0]!));
+      return apps(constant("add_succ_right"), term(hypothesis.left.args[0]!), term(successor.args[0]!));
     }
   }
   // length_append (as) (bs)  from  length(append(as, bs)) = add(length(as), length(bs))
   if (hypothesis.name === "length_append" && hypothesis.left.kind === "call") {
     const appended = hypothesis.left.args[0];
     if (appended?.kind === "call") {
-      return apps(constant("length_append"), expressionTerm(appended.args[0]!), expressionTerm(appended.args[1]!));
+      return apps(constant("length_append"), listElementTerm(scope, appended), term(appended.args[0]!), term(appended.args[1]!));
     }
   }
   return constant(lemmaNames[hypothesis.name] ?? hypothesis.name);
 }
 
-function rewriteProof(goal: EquationGoal, before: Expr, after: Expr, reason: string): Term | undefined {
+function rewriteProof(goal: EquationGoal, scope: GoalScope, before: Expr, after: Expr, reason: string): Term | undefined {
   const name = reason.slice("rewrite with ".length);
   const hypothesis = goal.hypotheses.find((candidate) => candidate.name === name);
   if (hypothesis === undefined) return undefined;
+  const typeVars = contextTypeVariables(goal.context);
+  const varTypes = contextTypes(goal.context);
   for (const occurrence of allExpressions(before)) {
     const replacement = instantiateHypothesis(hypothesis, occurrence);
     if (replacement === undefined || !expressionEqual(replaceById(before, occurrence.id, replacement), after)) continue;
-    const instantiatedArguments = generalizedArguments(hypothesis, occurrence);
+    const instantiatedArguments = generalizedArguments(hypothesis, occurrence, scope);
     if (instantiatedArguments === undefined) continue;
-    const type = valueType(goal.type);
+    // The congruence acts at the occurrence's own type (domain) into the whole
+    // side's type (codomain): both are recovered structurally, not assumed equal.
+    const occurrenceType = scope.kernelTypeOf(occurrence);
     const hole = variable("__rewrite_hole");
-    const contextFunction = lambda("__rewrite_hole", type, expressionTerm(before, occurrence.id, hole));
+    // Re-elaborate `before` with a typed hole spliced in at the occurrence.
+    const holeElaborator = expressionElaborator(
+      varTypes,
+      typeVars,
+      { id: occurrence.id, term: hole, type: scope.elaborator.typeOf(occurrence) },
+      ambientListElementSource === undefined ? undefined : parseTypeExpr(ambientListElementSource),
+    );
+    const contextFunction = lambda("__rewrite_hole", occurrenceType, holeElaborator.term(before, scope.resultTypeExpr));
     return congr(
-      type,
+      occurrenceType,
+      scope.resultType,
       contextFunction,
-      expressionTerm(occurrence),
-      expressionTerm(replacement),
-      apps(hypothesisProof(hypothesis), ...instantiatedArguments),
+      scope.elaborator.term(occurrence),
+      scope.elaborator.term(replacement),
+      apps(hypothesisProof(hypothesis, scope), ...instantiatedArguments),
     );
   }
   return undefined;
 }
 
-function generalizedArguments(hypothesis: Hypothesis, target: Expr): readonly Term[] | undefined {
+function generalizedArguments(hypothesis: Hypothesis, target: Expr, scope: GoalScope): readonly Term[] | undefined {
   const names = new Set(hypothesis.binders?.map((binder) => binder.name) ?? []);
   const bindings = new Map<string, Expr>();
   const match = (pattern: Expr, value: Expr): boolean => {
@@ -192,22 +295,21 @@ function generalizedArguments(hypothesis: Hypothesis, target: Expr): readonly Te
       && pattern.args.every((child, index) => match(child, value.args[index]!));
   };
   if (!match(hypothesis.left, target)) return undefined;
-  return (hypothesis.binders ?? []).map((binder) => expressionTerm(bindings.get(binder.name) ?? variableExpression(binder.name)));
+  return (hypothesis.binders ?? []).map((binder) => scope.elaborator.term(bindings.get(binder.name) ?? variableExpression(binder.name)));
 }
 
 function variableExpression(name: string): Expr {
   return { id: `certificate-${name}`, kind: "var", name };
 }
 
-function transitionProof(goal: EquationGoal, before: Expr, after: Expr, next: ProofStep, environment: Environment): Term {
-  const type = valueType(goal.type);
+function transitionProof(goal: EquationGoal, scope: GoalScope, before: Expr, after: Expr, next: ProofStep, environment: Environment): Term {
   if (next.reason.startsWith("rewrite with ")) {
-    const proof = rewriteProof(goal, before, after, next.reason);
+    const proof = rewriteProof(goal, scope, before, after, next.reason);
     if (proof === undefined) throw new Error(`cannot reconstruct ${next.reason}`);
     return proof;
   }
-  const proof = refl(expressionTerm(before));
-  check(proof, equal(type, expressionTerm(before), expressionTerm(after)), localContext(goal), environment);
+  const proof = refl(scope.side(before));
+  check(proof, equal(scope.resultType, scope.side(before), scope.side(after)), localContext(goal), environment);
   return proof;
 }
 
@@ -216,17 +318,18 @@ function chain(
   side: "left" | "right",
   environment: Environment,
 ): { readonly first: Term; readonly last: Term; readonly proof: Term } {
+  const scope = goalScope(goal.context, goal.type);
   const states = goal.steps.filter((step, index) => index === 0
     || !expressionEqual(step[side], goal.steps[index - 1]![side]));
-  const first = expressionTerm(states[0]![side]);
+  const first = scope.side(states[0]![side]);
   let last = first;
   let proof: Term = refl(first);
-  const type = valueType(goal.type);
+  const type = scope.resultType;
   for (let index = 1; index < states.length; index += 1) {
     const beforeExpr = states[index - 1]![side];
     const afterExpr = states[index]![side];
-    const after = expressionTerm(afterExpr);
-    const step = transitionProof(goal, beforeExpr, afterExpr, states[index]!, environment);
+    const after = scope.side(afterExpr);
+    const step = transitionProof(goal, scope, beforeExpr, afterExpr, states[index]!, environment);
     proof = trans(type, first, last, after, proof, step);
     last = after;
   }
@@ -240,7 +343,7 @@ function goalProof(goal: EquationGoal, environment: Environment): Term {
   if (!definitionallyEqual(left.last, right.last, environment)) {
     throw new Error(`obligation ${goal.label} does not finish by reflexivity`);
   }
-  const type = valueType(goal.type);
+  const type = goalScope(goal.context, goal.type).resultType;
   const proof = trans(
     type,
     left.first,
@@ -255,10 +358,10 @@ function goalProof(goal: EquationGoal, environment: Environment): Term {
 
 function validateOpenGoal(goal: EquationGoal, environment: Environment): void {
   const context = localContext(goal);
-  const expectedType = valueType(goal.type);
+  const scope = goalScope(goal.context, goal.type);
   for (const step of goal.steps) {
-    check(expressionTerm(step.left), expectedType, context, environment);
-    check(expressionTerm(step.right), expectedType, context, environment);
+    check(scope.side(step.left), scope.resultType, context, environment);
+    check(scope.side(step.right), scope.resultType, context, environment);
   }
   chain(goal, "left", environment);
   chain(goal, "right", environment);
@@ -308,13 +411,18 @@ function hypothesisMentionsFree(hypothesis: Hypothesis, name: string): boolean {
     .some((expr) => expr.kind === "var" && expr.name === name);
 }
 
-/** The kernel type of a hypothesis with the analyzed variable renamed to the motive value. */
-function hypothesisBinderType(type: Term, hypothesis: Hypothesis, variable?: string): Term {
+/**
+ * The kernel type of a hypothesis, elaborated in `scope`. When `variable` is
+ * given the analyzed program variable is renamed to the motive value first, so
+ * the reverted hypothesis Π-binder abstracts over exactly the recursor motive
+ * argument. `scope` types the motive value (and every other program variable).
+ */
+function hypothesisBinderType(type: Term, scope: GoalScope, typeVars: ReadonlySet<string>, hypothesis: Hypothesis, variable?: string): Term {
   const left = variable === undefined ? hypothesis.left : replaceProgramVariable(hypothesis.left, variable);
   const right = variable === undefined ? hypothesis.right : replaceProgramVariable(hypothesis.right, variable);
-  const proposition = equal(type, expressionTerm(left), expressionTerm(right));
+  const proposition = equal(type, scope.side(left), scope.side(right));
   return (hypothesis.binders ?? []).reduceRight(
-    (result, binder) => pi(binder.name, valueType(binder.type), result),
+    (result, binder) => pi(binder.name, elaborateTypeSource(binder.type, typeVars), result),
     proposition,
   );
 }
@@ -339,26 +447,36 @@ function goalTreeProof(session: ProofSession, goal: EquationGoal, environment: E
   if (inductive === undefined || analysis.branches.length !== inductive.constructors.length) {
     throw new Error("invalid analysis branches");
   }
-  const type = valueType(goal.type);
+  const typeVars = contextTypeVariables(goal.context);
+  const scope = goalScope(goal.context, goal.type);
+  const type = scope.resultType;
+  // The analyzed variable's own source type gives the recursor's type
+  // parameters (`[A]` for `List A`, none for Bool/Nat) and the motive value's
+  // type. The motive scope maps `__motive_value` to that same source type.
+  const analyzedSource = contextTypeSource(goal.context, analysis.variable);
+  const motiveValueType = elaborateTypeSource(analyzedSource, typeVars);
+  const recursorParameters = recursorTypeParameters(analyzedSource, typeVars);
+  const motiveScope = goalScope(goal.context, goal.type, new Map([["__motive_value", analyzedSource]]));
   const generalized = generalizedBinders(goal);
   const reverted = goal.hypotheses.filter((hypothesis) => hypothesisMentionsFree(hypothesis, analysis.variable));
   const revertedBinders = reverted.map((hypothesis): Binder => ({
     name: hypothesis.name,
-    type: hypothesisBinderType(type, hypothesis, analysis.variable),
+    type: hypothesisBinderType(type, motiveScope, typeVars, hypothesis, analysis.variable),
   }));
   const motiveBody = equal(
     type,
-    expressionTerm(replaceProgramVariable(goal.left, analysis.variable)),
-    expressionTerm(replaceProgramVariable(goal.right, analysis.variable)),
+    motiveScope.side(replaceProgramVariable(goal.left, analysis.variable)),
+    motiveScope.side(replaceProgramVariable(goal.right, analysis.variable)),
   );
   const typedMotive = lambda(
     "__motive_value",
-    constant(analysis.type),
+    motiveValueType,
     wrapPis([...generalized, ...revertedBinders], motiveBody),
   );
   const branchTerms = analysis.branches.map((branch) => {
     const child = equationGoalById(session, branch.goalId);
-    const fields = branch.fields.map((field) => ({ name: field.name, type: valueType(field.type) }));
+    const childScope = goalScope(child.context, child.type);
+    const fields = branch.fields.map((field) => ({ name: field.name, type: elaborateTypeSource(field.type, contextTypeVariables(child.context)) }));
     // The kernel recursor always binds an induction hypothesis for every
     // recursive field; for a case analysis the binder is simply unused.
     const inductionHypotheses = branch.fields.filter((field) => field.recursive === true).map((field) => ({
@@ -371,7 +489,7 @@ function goalTreeProof(session: ProofSession, goal: EquationGoal, environment: E
     const branchReverted = reverted.map((hypothesis): Binder => {
       const instantiated = child.hypotheses.find((candidate) => candidate.id === hypothesis.id);
       if (instantiated === undefined) throw new Error(`missing instantiated hypothesis ${hypothesis.name}`);
-      return { name: instantiated.name, type: hypothesisBinderType(type, instantiated) };
+      return { name: instantiated.name, type: hypothesisBinderType(type, childScope, contextTypeVariables(child.context), instantiated) };
     });
     return wrapLambdas(
       [...fields, ...inductionHypotheses, ...generalized, ...branchReverted],
@@ -379,9 +497,9 @@ function goalTreeProof(session: ProofSession, goal: EquationGoal, environment: E
     );
   });
   const recursorProof = apps(
-    recursor(analysis.type, typedMotive, branchTerms, variable(analysis.variable)),
+    recursor(analysis.type, typedMotive, branchTerms, variable(analysis.variable), recursorParameters),
     ...generalized.map((binder) => variable(binder.name)),
-    ...reverted.map((hypothesis) => hypothesisProof(hypothesis)),
+    ...reverted.map((hypothesis) => hypothesisProof(hypothesis, scope)),
   );
   const left = chain(goal, "left", environment);
   const right = chain(goal, "right", environment);
@@ -532,8 +650,8 @@ function theoremCertificate(session: ProofSession, environment: Environment): { 
   if (session.theoremLeft === undefined || session.theoremRight === undefined) {
     throw new Error("the session does not state an equation");
   }
-  const resultType = valueType(root.type);
-  const statement = equal(resultType, expressionTerm(session.theoremLeft), expressionTerm(session.theoremRight));
+  const scope = goalScope(session.theoremContext, root.type);
+  const statement = equal(scope.resultType, scope.side(session.theoremLeft), scope.side(session.theoremRight));
   return {
     type: wrapPis(theoremBinders, statement),
     term: wrapLambdas(theoremBinders, goalTreeProof(session, root, environment)),
@@ -620,6 +738,7 @@ export function checkProofSession(value: unknown): KernelCertificate {
   const session = decodeProofSession(value);
   const environment = touchProofEnvironment();
   assertAxiomFree(environment);
+  ambientListElementSource = firstListElementSource(session.theoremContext);
   for (const goal of [...session.ancestors, ...session.goals]) {
     if (isPropositionGoal(goal)) validatePropositionGoal(goal, environment);
     else validateOpenGoal(goal, environment);

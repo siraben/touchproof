@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { checkProofSession } from "../../src/proof/certificate.js";
+import { termToString, type Term } from "../../src/kernel/term.js";
 import { applyProofMove, createLessonSession, enumerateProofMoves, lessonCatalog, type EquationGoal, type ProofSession } from "../../src/proof/session.js";
+
+/** The chain of `Π` binders at the head of a term, as (name, printed-type) pairs, plus the remaining body. */
+function piBinders(term: Term): { readonly binders: readonly (readonly [string, string])[]; readonly body: Term } {
+  const binders: (readonly [string, string])[] = [];
+  let current = term;
+  while (current.kind === "pi") {
+    binders.push([current.param, termToString(current.domain)]);
+    current = current.codomain;
+  }
+  return { binders, body: current };
+}
 
 function finish(lessonId: string): ProofSession {
   let session = createLessonSession(lessonId);
@@ -34,6 +46,44 @@ describe("exact visual proof certificates", () => {
     expect(certificate.theoremTerm).toBeDefined();
     expect(certificate.theoremType).toBeDefined();
     expect(certificate.script).not.toContain("sorry");
+  });
+
+  it("proves the polymorphic map-composition statement, not its Elem instance", () => {
+    const certificate = checkProofSession(finish("map-composition"));
+    const type = certificate.theoremType!;
+    // It quantifies its three source-level element types explicitly.
+    const { binders, body } = piBinders(type);
+    expect(binders).toEqual([
+      ["A", "Type 0"],
+      ["B", "Type 0"],
+      ["C", "Type 0"],
+      ["f", "(Π _ : B, C)"],
+      ["g", "(Π _ : A, B)"],
+      ["l", "List A"],
+    ]);
+    // The body uses applied polymorphic List/map/compose — never a bare `Elem`.
+    expect(termToString(body)).toBe("(map A C (compose A B C f g) l = map B C f (map A B g l))");
+    expect(termToString(type)).not.toContain("Elem");
+  });
+
+  it("binds the element types of list-map-append and applies List/map, never Elem", () => {
+    const type = checkProofSession(finish("list-map-append")).theoremType!;
+    const { binders, body } = piBinders(type);
+    expect(binders).toEqual([
+      ["A", "Type 0"],
+      ["B", "Type 0"],
+      ["f", "(Π _ : A, B)"],
+      ["xs", "List A"],
+      ["ys", "List A"],
+    ]);
+    expect(termToString(body)).toBe("(map A B f (append A xs ys) = append B (map A B f xs) (map A B f ys))");
+    expect(termToString(type)).not.toContain("Elem");
+  });
+
+  it("keeps the monomorphic lessons monomorphic (no spurious type binders)", () => {
+    const type = checkProofSession(finish("nat-add-zero")).theoremType!;
+    expect(piBinders(type).binders).toEqual([["n", "Nat"]]);
+    expect(termToString(type)).toBe("(Π n : Nat, (add n zero = n))");
   });
 
   it("rejects a mutated visible transition", () => {

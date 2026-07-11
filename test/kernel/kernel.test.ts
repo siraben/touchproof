@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assertAxiomFree, check, checkDeclaration, declareAxiom, declareInductive, declareParameterizedInductive, definitionallyEqual, emptyEnvironment, environmentAxioms, infer, KernelError, normalize } from "../../src/kernel/checker.js";
-import { app, apps, constant, equal, lambda, letIn, pi, recursor, refl, subst, type, variable } from "../../src/kernel/term.js";
+import { app, apps, constant, equal, lambda, letIn, pi, recursor, refl, subst, type, variable, type Term } from "../../src/kernel/term.js";
 import {
   addAssocProof,
   addCommProof,
@@ -98,6 +98,31 @@ describe("dependent kernel", () => {
     expect(definitionallyEqual(infer(extracted, new Map(), environment), elementType, environment)).toBe(true);
     expect(() => infer(recursor("Option", lambda("_", apps(constant("Option"), elementType), elementType), [element, lambda("value", elementType, variable("value"))], someElement), new Map(), environment))
       .toThrow(KernelError);
+  });
+
+  it("declares List : Type → Type and computes with polymorphic map", () => {
+    let environment = declareParameterizedInductive("List", [{ name: "A", type: type(0) }], [
+      { name: "nil", fields: [] },
+      { name: "cons", fields: [{ name: "head", type: variable("A") }, { name: "tail", type: apps(constant("List"), variable("A")) }] },
+    ], emptyEnvironment());
+    environment = declareInductive("Bool", [{ name: "on", fields: [] }, { name: "off", fields: [] }], environment);
+    const list = (a: Term) => apps(constant("List"), a);
+    // map : Π A B, (A → B) → List A → List B, defined by the List recursor.
+    const map = lambda("A", type(0), lambda("B", type(0), lambda("f", pi("_", variable("A"), variable("B")), lambda("xs", list(variable("A")),
+      recursor("List", lambda("_", list(variable("A")), list(variable("B"))), [
+        app(constant("nil"), variable("B")),
+        lambda("head", variable("A"), lambda("tail", list(variable("A")), lambda("ih", list(variable("B")),
+          apps(constant("cons"), variable("B"), app(variable("f"), variable("head")), variable("ih"))))),
+      ], variable("xs"), [variable("A")])))));
+    const mapType = pi("A", type(0), pi("B", type(0), pi("f", pi("_", variable("A"), variable("B")), pi("xs", list(variable("A")), list(variable("B"))))));
+    expect(() => check(map, mapType, new Map(), environment)).not.toThrow();
+    // map Bool Bool negb [on] reduces to [off]: an honest polymorphic computation.
+    const negb = lambda("b", constant("Bool"), recursor("Bool", lambda("_", constant("Bool"), constant("Bool")), [constant("off"), constant("on")], variable("b")));
+    const singleton = (a: Term, x: Term) => apps(constant("cons"), a, x, app(constant("nil"), a));
+    const mapped = apps(map, constant("Bool"), constant("Bool"), negb, singleton(constant("Bool"), constant("on")));
+    expect(definitionallyEqual(mapped, singleton(constant("Bool"), constant("off")), environment)).toBe(true);
+    // The element type is load-bearing: List Bool is not List (List Bool).
+    expect(definitionallyEqual(list(constant("Bool")), list(list(constant("Bool"))), environment)).toBe(false);
   });
 
   it("supports empty inductives and rejects malformed declarations", () => {

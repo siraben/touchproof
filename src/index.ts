@@ -96,6 +96,25 @@ export {
 } from "./proof/definitions.js";
 export type { DefinitionClause, ProgramDefinition, Reduction } from "./proof/definitions.js";
 export { parseProgramExpr, ProgramParseError } from "./proof/ast.js";
+// The proof-language TYPE layer: a structured type AST (named types, type
+// variables, Type, arrows, and List-style type application) with a parser,
+// printer, and elaboration into kernel terms. This is what makes the visual
+// polymorphic theorems (List A → List B, map composition) check with their
+// displayed generality rather than a monomorphic Elem shadow.
+export {
+  parseTypeExpr,
+  typeExprToString,
+  typeVariables,
+  elaborateType,
+  elaborateTypeSource,
+  TypeParseError,
+} from "./proof/types.js";
+export type { TypeExpr } from "./proof/types.js";
+// Typed elaboration of program expressions into kernel terms: reconstructs the
+// explicit type arguments a non-inferring dependent kernel needs for
+// polymorphic constants (map, nil, cons, append, ...).
+export { expressionElaborator, contextTypes, contextTypeVariables, ElaborationError } from "./proof/elaborate.js";
+export type { ExpressionElaborator } from "./proof/elaborate.js";
 // Operator fixities: the single table that drives parsing AND printing of the
 // proof language's infix operators (precedence, associativity, spelling,
 // spacing). Renderers should parenthesize from this table too.

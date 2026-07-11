@@ -22,6 +22,23 @@ function pis(bindings: readonly (readonly [string, Term])[], result: Term): Term
   return bindings.reduceRight((body, [name, domain]) => pi(name, domain, body), result);
 }
 
+function lambdas(bindings: readonly (readonly [string, Term])[], body: Term): Term {
+  return bindings.reduceRight((result, [name, domain]) => lambda(name, domain, result), body);
+}
+
+// ---------------------------------------------------------------------------
+// Polymorphic List primitives. `List : Type → Type`; every constructor and
+// list function takes its element type(s) as leading arguments, exactly as an
+// explicit (non-inferring) dependent kernel requires.
+// ---------------------------------------------------------------------------
+
+/** `List A` for a kernel element type A. */
+export const listType = (a: Term): Term => app(c("List"), a);
+/** `nil : Π A, List A` applied at A. */
+export const nilAt = (a: Term): Term => app(c("nil"), a);
+/** `cons : Π A, A → List A → List A` applied. */
+export const consAt = (a: Term, head: Term, tail: Term): Term => apps(c("cons"), a, head, tail);
+
 export function touchProofEnvironment(): Environment {
   let env: Environment = emptyEnvironment();
   const add = (name: string, declaration: DefinitionInput): void => { env = checkDeclaration(name, declaration, env); };
@@ -34,9 +51,11 @@ export function touchProofEnvironment(): Environment {
     { name: "zero", fields: [] },
     { name: "succ", fields: [{ name: "pred", type: c("Nat") }] },
   ], env);
-  env = declareInductive("List", [
+  // Genuinely parameterized: `List : Type → Type`, so `List A`, `nil A` and
+  // `cons A x xs` all carry the element type explicitly.
+  env = declareParameterizedInductive("List", [{ name: "A", type: type(0) }], [
     { name: "nil", fields: [] },
-    { name: "cons", fields: [{ name: "head", type: c("Elem") }, { name: "tail", type: c("List") }] },
+    { name: "cons", fields: [{ name: "head", type: v("A") }, { name: "tail", type: listType(v("A")) }] },
   ], env);
   // Conjunction over the propositional universe. TouchProof displays that
   // universe as `Prop`, but the kernel is predicative: `Prop` IS `Type 0`,
@@ -61,48 +80,60 @@ export function touchProofEnvironment(): Environment {
       lambda("pred", c("Nat"), lambda("ih_pred", c("Nat"), app(c("succ"), v("ih_pred")))),
     ], v("left")))),
   });
+  // append : Π A, List A → List A → List A
   add("append", {
-    type: pis([["left", c("List")], ["right", c("List")]], c("List")),
-    value: lambda("left", c("List"), lambda("right", c("List"), recursor("List", lambda("_", c("List"), c("List")), [
-      v("right"),
-      lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", c("List"), apps(c("cons"), v("head"), v("ih_tail"))))),
-    ], v("left")))),
+    type: pis([["A", type(0)], ["left", listType(v("A"))], ["right", listType(v("A"))]], listType(v("A"))),
+    value: lambdas([["A", type(0)], ["left", listType(v("A"))], ["right", listType(v("A"))]],
+      recursor("List", lambda("_", listType(v("A")), listType(v("A"))), [
+        v("right"),
+        lambdas([["head", v("A")], ["tail", listType(v("A"))], ["ih_tail", listType(v("A"))]], consAt(v("A"), v("head"), v("ih_tail"))),
+      ], v("left"), [v("A")])),
   });
+  // map : Π A B, (A → B) → List A → List B
   add("map", {
-    type: pis([["f", arrow(c("Elem"), c("Elem"))], ["xs", c("List")]], c("List")),
-    value: lambda("f", arrow(c("Elem"), c("Elem")), lambda("xs", c("List"), recursor("List", lambda("_", c("List"), c("List")), [
-      c("nil"),
-      lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", c("List"), apps(c("cons"), app(v("f"), v("head")), v("ih_tail"))))),
-    ], v("xs")))),
+    type: pis([["A", type(0)], ["B", type(0)], ["f", arrow(v("A"), v("B"))], ["xs", listType(v("A"))]], listType(v("B"))),
+    value: lambdas([["A", type(0)], ["B", type(0)], ["f", arrow(v("A"), v("B"))], ["xs", listType(v("A"))]],
+      recursor("List", lambda("_", listType(v("A")), listType(v("B"))), [
+        nilAt(v("B")),
+        lambdas([["head", v("A")], ["tail", listType(v("A"))], ["ih_tail", listType(v("B"))]], consAt(v("B"), app(v("f"), v("head")), v("ih_tail"))),
+      ], v("xs"), [v("A")])),
   });
+  // rev : Π A, List A → List A
   add("rev", {
-    type: arrow(c("List"), c("List")),
-    value: lambda("xs", c("List"), recursor("List", lambda("_", c("List"), c("List")), [
-      c("nil"),
-      lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", c("List"), apps(c("append"), v("ih_tail"), apps(c("cons"), v("head"), c("nil")))))),
-    ], v("xs"))),
+    type: pis([["A", type(0)], ["xs", listType(v("A"))]], listType(v("A"))),
+    value: lambdas([["A", type(0)], ["xs", listType(v("A"))]],
+      recursor("List", lambda("_", listType(v("A")), listType(v("A"))), [
+        nilAt(v("A")),
+        lambdas([["head", v("A")], ["tail", listType(v("A"))], ["ih_tail", listType(v("A"))]],
+          apps(c("append"), v("A"), v("ih_tail"), consAt(v("A"), v("head"), nilAt(v("A"))))),
+      ], v("xs"), [v("A")])),
   });
+  // revAcc : Π A, List A → List A → List A
   add("revAcc", {
-    type: pis([["xs", c("List")], ["acc", c("List")]], c("List")),
-    value: lambda("xs", c("List"), lambda("acc", c("List"), apps(
-      recursor("List", lambda("_", c("List"), arrow(c("List"), c("List"))), [
-        lambda("current", c("List"), v("current")),
-        lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", arrow(c("List"), c("List")),
-          lambda("current", c("List"), app(v("ih_tail"), apps(c("cons"), v("head"), v("current"))))))),
-      ], v("xs")),
+    type: pis([["A", type(0)], ["xs", listType(v("A"))], ["acc", listType(v("A"))]], listType(v("A"))),
+    value: lambdas([["A", type(0)], ["xs", listType(v("A"))], ["acc", listType(v("A"))]], apps(
+      recursor("List", lambda("_", listType(v("A")), arrow(listType(v("A")), listType(v("A")))), [
+        lambda("current", listType(v("A")), v("current")),
+        lambdas([["head", v("A")], ["tail", listType(v("A"))], ["ih_tail", arrow(listType(v("A")), listType(v("A")))]],
+          lambda("current", listType(v("A")), app(v("ih_tail"), consAt(v("A"), v("head"), v("current"))))),
+      ], v("xs"), [v("A")]),
       v("acc"),
-    ))),
+    )),
   });
+  // length : Π A, List A → Nat
   add("length", {
-    type: arrow(c("List"), c("Nat")),
-    value: lambda("xs", c("List"), recursor("List", lambda("_", c("List"), c("Nat")), [
-      c("zero"),
-      lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", c("Nat"), app(c("succ"), v("ih_tail"))))),
-    ], v("xs"))),
+    type: pis([["A", type(0)], ["xs", listType(v("A"))]], c("Nat")),
+    value: lambdas([["A", type(0)], ["xs", listType(v("A"))]],
+      recursor("List", lambda("_", listType(v("A")), c("Nat")), [
+        c("zero"),
+        lambdas([["head", v("A")], ["tail", listType(v("A"))], ["ih_tail", c("Nat")]], app(c("succ"), v("ih_tail"))),
+      ], v("xs"), [v("A")])),
   });
+  // compose : Π A B C, (B → C) → (A → B) → A → C
   add("compose", {
-    type: pis([["f", arrow(c("Elem"), c("Elem"))], ["g", arrow(c("Elem"), c("Elem"))], ["x", c("Elem")]], c("Elem")),
-    value: lambda("f", arrow(c("Elem"), c("Elem")), lambda("g", arrow(c("Elem"), c("Elem")), lambda("x", c("Elem"), app(v("f"), app(v("g"), v("x")))))),
+    type: pis([["A", type(0)], ["B", type(0)], ["C", type(0)], ["f", arrow(v("B"), v("C"))], ["g", arrow(v("A"), v("B"))], ["x", v("A")]], v("C")),
+    value: lambdas([["A", type(0)], ["B", type(0)], ["C", type(0)], ["f", arrow(v("B"), v("C"))], ["g", arrow(v("A"), v("B"))], ["x", v("A")]],
+      app(v("f"), app(v("g"), v("x")))),
   });
 
   add("bool_induction", {
@@ -113,9 +144,22 @@ export function touchProofEnvironment(): Environment {
     type: pis([["P", arrow(c("Nat"), type(0))], ["zeroCase", app(v("P"), c("zero"))], ["succCase", pis([["n", c("Nat")], ["ih", app(v("P"), v("n"))]], app(v("P"), app(c("succ"), v("n"))))], ["n", c("Nat")]], app(v("P"), v("n"))),
     value: lambda("P", arrow(c("Nat"), type(0)), lambda("zeroCase", app(v("P"), c("zero")), lambda("succCase", pis([["n", c("Nat")], ["ih", app(v("P"), v("n"))]], app(v("P"), app(c("succ"), v("n")))), lambda("n", c("Nat"), recursor("Nat", v("P"), [v("zeroCase"), v("succCase")], v("n")))))),
   });
+  // list_induction : Π A (P : List A → Type 0), P (nil A) → (Π x xs, P xs → P (cons A x xs)) → Π xs, P xs
   add("list_induction", {
-    type: pis([["P", arrow(c("List"), type(0))], ["nilCase", app(v("P"), c("nil"))], ["consCase", pis([["x", c("Elem")], ["xs", c("List")], ["ih", app(v("P"), v("xs"))]], app(v("P"), apps(c("cons"), v("x"), v("xs"))))], ["xs", c("List")]], app(v("P"), v("xs"))),
-    value: lambda("P", arrow(c("List"), type(0)), lambda("nilCase", app(v("P"), c("nil")), lambda("consCase", pis([["x", c("Elem")], ["xs", c("List")], ["ih", app(v("P"), v("xs"))]], app(v("P"), apps(c("cons"), v("x"), v("xs")))), lambda("xs", c("List"), recursor("List", v("P"), [v("nilCase"), v("consCase")], v("xs")))))),
+    type: pis([
+      ["A", type(0)],
+      ["P", arrow(listType(v("A")), type(0))],
+      ["nilCase", app(v("P"), nilAt(v("A")))],
+      ["consCase", pis([["x", v("A")], ["xs", listType(v("A"))], ["ih", app(v("P"), v("xs"))]], app(v("P"), consAt(v("A"), v("x"), v("xs"))))],
+      ["xs", listType(v("A"))],
+    ], app(v("P"), v("xs"))),
+    value: lambdas([
+      ["A", type(0)],
+      ["P", arrow(listType(v("A")), type(0))],
+      ["nilCase", app(v("P"), nilAt(v("A")))],
+      ["consCase", pis([["x", v("A")], ["xs", listType(v("A"))], ["ih", app(v("P"), v("xs"))]], app(v("P"), consAt(v("A"), v("x"), v("xs"))))],
+      ["xs", listType(v("A"))],
+    ], recursor("List", v("P"), [v("nilCase"), v("consCase")], v("xs"), [v("A")])),
   });
 
   add("eq_symm", {
@@ -152,9 +196,13 @@ export function touchProofEnvironment(): Environment {
   const equations: readonly [string, Term, Term][] = [
     ["negb_true", equal(c("Bool"), app(c("negb"), c("true")), c("false")), app(c("negb"), c("true"))],
     ["negb_false", equal(c("Bool"), app(c("negb"), c("false")), c("true")), app(c("negb"), c("false"))],
-    ["rev_nil", equal(c("List"), app(c("rev"), c("nil")), c("nil")), app(c("rev"), c("nil"))],
   ];
   for (const [name, theoremType, left] of equations) add(name, { type: theoremType, value: refl(left) });
+  // rev_nil : Π A, rev A (nil A) = nil A
+  add("rev_nil", {
+    type: pis([["A", type(0)]], equal(listType(v("A")), apps(c("rev"), v("A"), nilAt(v("A"))), nilAt(v("A")))),
+    value: lambda("A", type(0), refl(apps(c("rev"), v("A"), nilAt(v("A"))))),
+  });
   addDefinitionalEquations(add);
 
   const appendNil = appendNilRightProof();
@@ -177,58 +225,84 @@ export function touchProofEnvironment(): Environment {
 }
 
 function addDefinitionalEquations(add: (name: string, declaration: DefinitionInput) => void): void {
-  const functionType = arrow(c("Elem"), c("Elem"));
+  const A = v("A");
+  const B = v("B");
+  const list = (a: Term): Term => listType(a);
   const definitions: readonly [string, Term, Term][] = [
     ["add_zero_left", pis([["m", c("Nat")]], equal(c("Nat"), apps(c("add"), c("zero"), v("m")), v("m"))),
       lambda("m", c("Nat"), refl(apps(c("add"), c("zero"), v("m"))))],
     ["add_succ_left", pis([["n", c("Nat")], ["m", c("Nat")]], equal(c("Nat"), apps(c("add"), app(c("succ"), v("n")), v("m")), app(c("succ"), apps(c("add"), v("n"), v("m"))))),
       lambda("n", c("Nat"), lambda("m", c("Nat"), refl(apps(c("add"), app(c("succ"), v("n")), v("m")))))],
-    ["map_nil", pis([["f", functionType]], equal(c("List"), apps(c("map"), v("f"), c("nil")), c("nil"))),
-      lambda("f", functionType, refl(apps(c("map"), v("f"), c("nil"))))],
-    ["map_cons", pis([["f", functionType], ["x", c("Elem")], ["xs", c("List")]], equal(c("List"), apps(c("map"), v("f"), apps(c("cons"), v("x"), v("xs"))), apps(c("cons"), app(v("f"), v("x")), apps(c("map"), v("f"), v("xs"))))),
-      lambda("f", functionType, lambda("x", c("Elem"), lambda("xs", c("List"), refl(apps(c("map"), v("f"), apps(c("cons"), v("x"), v("xs")))))))],
-    ["append_nil_left", pis([["ys", c("List")]], equal(c("List"), apps(c("append"), c("nil"), v("ys")), v("ys"))),
-      lambda("ys", c("List"), refl(apps(c("append"), c("nil"), v("ys"))))],
-    ["append_cons_left", pis([["x", c("Elem")], ["xs", c("List")], ["ys", c("List")]], equal(c("List"), apps(c("append"), apps(c("cons"), v("x"), v("xs")), v("ys")), apps(c("cons"), v("x"), apps(c("append"), v("xs"), v("ys"))))),
-      lambda("x", c("Elem"), lambda("xs", c("List"), lambda("ys", c("List"), refl(apps(c("append"), apps(c("cons"), v("x"), v("xs")), v("ys"))))))],
-    ["rev_cons", pis([["x", c("Elem")], ["xs", c("List")]], equal(c("List"), app(c("rev"), apps(c("cons"), v("x"), v("xs"))), apps(c("append"), app(c("rev"), v("xs")), apps(c("cons"), v("x"), c("nil"))))),
-      lambda("x", c("Elem"), lambda("xs", c("List"), refl(app(c("rev"), apps(c("cons"), v("x"), v("xs"))))))],
-    ["compose_apply", pis([["f", functionType], ["g", functionType], ["x", c("Elem")]], equal(c("Elem"), apps(c("compose"), v("f"), v("g"), v("x")), app(v("f"), app(v("g"), v("x"))))),
-      lambda("f", functionType, lambda("g", functionType, lambda("x", c("Elem"), refl(apps(c("compose"), v("f"), v("g"), v("x"))))))],
-    ["revAcc_nil", pis([["acc", c("List")]], equal(c("List"), apps(c("revAcc"), c("nil"), v("acc")), v("acc"))),
-      lambda("acc", c("List"), refl(apps(c("revAcc"), c("nil"), v("acc"))))],
-    ["revAcc_cons", pis([["x", c("Elem")], ["xs", c("List")], ["acc", c("List")]], equal(c("List"), apps(c("revAcc"), apps(c("cons"), v("x"), v("xs")), v("acc")), apps(c("revAcc"), v("xs"), apps(c("cons"), v("x"), v("acc"))))),
-      lambda("x", c("Elem"), lambda("xs", c("List"), lambda("acc", c("List"), refl(apps(c("revAcc"), apps(c("cons"), v("x"), v("xs")), v("acc"))))))],
-    ["length_nil", equal(c("Nat"), app(c("length"), c("nil")), c("zero")),
-      refl(app(c("length"), c("nil")))],
-    ["length_cons", pis([["x", c("Elem")], ["xs", c("List")]], equal(c("Nat"), app(c("length"), apps(c("cons"), v("x"), v("xs"))), app(c("succ"), app(c("length"), v("xs"))))),
-      lambda("x", c("Elem"), lambda("xs", c("List"), refl(app(c("length"), apps(c("cons"), v("x"), v("xs"))))))],
+    // map_nil : Π A B (f : A → B), map A B f (nil A) = nil B
+    ["map_nil", pis([["A", type(0)], ["B", type(0)], ["f", arrow(A, B)]], equal(list(B), apps(c("map"), A, B, v("f"), nilAt(A)), nilAt(B))),
+      lambdas([["A", type(0)], ["B", type(0)], ["f", arrow(A, B)]], refl(apps(c("map"), A, B, v("f"), nilAt(A))))],
+    // map_cons : Π A B (f) x xs, map A B f (cons A x xs) = cons B (f x) (map A B f xs)
+    ["map_cons", pis([["A", type(0)], ["B", type(0)], ["f", arrow(A, B)], ["x", A], ["xs", list(A)]],
+      equal(list(B), apps(c("map"), A, B, v("f"), consAt(A, v("x"), v("xs"))), consAt(B, app(v("f"), v("x")), apps(c("map"), A, B, v("f"), v("xs"))))),
+      lambdas([["A", type(0)], ["B", type(0)], ["f", arrow(A, B)], ["x", A], ["xs", list(A)]], refl(apps(c("map"), A, B, v("f"), consAt(A, v("x"), v("xs")))))],
+    // append_nil_left : Π A ys, append A (nil A) ys = ys
+    ["append_nil_left", pis([["A", type(0)], ["ys", list(A)]], equal(list(A), apps(c("append"), A, nilAt(A), v("ys")), v("ys"))),
+      lambdas([["A", type(0)], ["ys", list(A)]], refl(apps(c("append"), A, nilAt(A), v("ys"))))],
+    // append_cons_left : Π A x xs ys, append A (cons A x xs) ys = cons A x (append A xs ys)
+    ["append_cons_left", pis([["A", type(0)], ["x", A], ["xs", list(A)], ["ys", list(A)]],
+      equal(list(A), apps(c("append"), A, consAt(A, v("x"), v("xs")), v("ys")), consAt(A, v("x"), apps(c("append"), A, v("xs"), v("ys"))))),
+      lambdas([["A", type(0)], ["x", A], ["xs", list(A)], ["ys", list(A)]], refl(apps(c("append"), A, consAt(A, v("x"), v("xs")), v("ys"))))],
+    // rev_cons : Π A x xs, rev A (cons A x xs) = append A (rev A xs) (cons A x (nil A))
+    ["rev_cons", pis([["A", type(0)], ["x", A], ["xs", list(A)]],
+      equal(list(A), apps(c("rev"), A, consAt(A, v("x"), v("xs"))), apps(c("append"), A, apps(c("rev"), A, v("xs")), consAt(A, v("x"), nilAt(A))))),
+      lambdas([["A", type(0)], ["x", A], ["xs", list(A)]], refl(apps(c("rev"), A, consAt(A, v("x"), v("xs")))))],
+    // compose_apply : Π A B C (f : B → C) (g : A → B) x, compose A B C f g x = f (g x)
+    ["compose_apply", pis([["A", type(0)], ["B", type(0)], ["C", type(0)], ["f", arrow(B, v("C"))], ["g", arrow(A, B)], ["x", A]],
+      equal(v("C"), apps(c("compose"), A, B, v("C"), v("f"), v("g"), v("x")), app(v("f"), app(v("g"), v("x"))))),
+      lambdas([["A", type(0)], ["B", type(0)], ["C", type(0)], ["f", arrow(B, v("C"))], ["g", arrow(A, B)], ["x", A]], refl(apps(c("compose"), A, B, v("C"), v("f"), v("g"), v("x"))))],
+    // revAcc_nil : Π A acc, revAcc A (nil A) acc = acc
+    ["revAcc_nil", pis([["A", type(0)], ["acc", list(A)]], equal(list(A), apps(c("revAcc"), A, nilAt(A), v("acc")), v("acc"))),
+      lambdas([["A", type(0)], ["acc", list(A)]], refl(apps(c("revAcc"), A, nilAt(A), v("acc"))))],
+    // revAcc_cons : Π A x xs acc, revAcc A (cons A x xs) acc = revAcc A xs (cons A x acc)
+    ["revAcc_cons", pis([["A", type(0)], ["x", A], ["xs", list(A)], ["acc", list(A)]],
+      equal(list(A), apps(c("revAcc"), A, consAt(A, v("x"), v("xs")), v("acc")), apps(c("revAcc"), A, v("xs"), consAt(A, v("x"), v("acc"))))),
+      lambdas([["A", type(0)], ["x", A], ["xs", list(A)], ["acc", list(A)]], refl(apps(c("revAcc"), A, consAt(A, v("x"), v("xs")), v("acc"))))],
+    // length_nil : Π A, length A (nil A) = zero
+    ["length_nil", pis([["A", type(0)]], equal(c("Nat"), apps(c("length"), A, nilAt(A)), c("zero"))),
+      lambda("A", type(0), refl(apps(c("length"), A, nilAt(A))))],
+    // length_cons : Π A x xs, length A (cons A x xs) = succ (length A xs)
+    ["length_cons", pis([["A", type(0)], ["x", A], ["xs", list(A)]], equal(c("Nat"), apps(c("length"), A, consAt(A, v("x"), v("xs"))), app(c("succ"), apps(c("length"), A, v("xs"))))),
+      lambdas([["A", type(0)], ["x", A], ["xs", list(A)]], refl(apps(c("length"), A, consAt(A, v("x"), v("xs")))))],
   ];
   for (const [name, theoremType, value] of definitions) add(name, { type: theoremType, value });
 }
 
+// ---------------------------------------------------------------------------
+// Hand-assembled curriculum certificates, now polymorphic. Each list lesson
+// quantifies its element type variable(s) as leading Π/λ binders and threads
+// them through every applied `List`, constructor, and list function.
+// ---------------------------------------------------------------------------
+
 export function appendAssociativityProof(): { readonly type: Term; readonly term: Term } {
-  const list = c("List");
+  const A = v("A");
+  const list = listType(A);
   const xs = v("xs");
   const ys = v("ys");
   const zs = v("zs");
   const x = v("x");
   const tail = v("tail");
-  const append = (left: Term, right: Term): Term => apps(c("append"), left, right);
+  const nil = nilAt(A);
+  const cons = (head: Term, rest: Term): Term => consAt(A, head, rest);
+  const append = (left: Term, right: Term): Term => apps(c("append"), A, left, right);
   const proposition = (value: Term): Term => equal(list, append(append(value, ys), zs), append(value, append(ys, zs)));
   const motive = lambda("value", list, proposition(v("value")));
-  const base = refl(append(append(c("nil"), ys), zs));
-  const step = lambda("x", c("Elem"), lambda("tail", list, lambda("ih", proposition(tail), congr(
+  const base = refl(append(append(nil, ys), zs));
+  const step = lambda("x", A, lambda("tail", list, lambda("ih", proposition(tail), congr(
     list,
     list,
-    lambda("rest", list, apps(c("cons"), x, v("rest"))),
+    lambda("rest", list, cons(x, v("rest"))),
     append(append(tail, ys), zs),
     append(tail, append(ys, zs)),
     v("ih"),
   ))));
   return {
-    type: pis([["xs", list], ["ys", list], ["zs", list]], proposition(xs)),
-    term: lambda("xs", list, lambda("ys", list, lambda("zs", list, apps(c("list_induction"), motive, base, step, xs)))),
+    type: pis([["A", type(0)], ["xs", list], ["ys", list], ["zs", list]], proposition(xs)),
+    term: lambdas([["A", type(0)], ["xs", list], ["ys", list], ["zs", list]], apps(c("list_induction"), A, motive, base, step, xs)),
   };
 }
 
@@ -244,105 +318,108 @@ function congr(a: Term, b: Term, fn: Term, x: Term, y: Term, proof: Term): Term 
   return apps(c("congr_arg"), a, b, fn, x, y, proof);
 }
 
-/** Kernel proof term behind the visual map-composition walkthrough. */
+/** Kernel proof term behind the visual map-composition walkthrough. Polymorphic in A, B, C. */
 export function mapCompositionProof(): { readonly type: Term; readonly term: Term } {
-  const elem = c("Elem");
-  const list = c("List");
-  const fn = arrow(elem, elem);
+  const A = v("A");
+  const B = v("B");
+  const C = v("C");
+  const listA = listType(A);
+  const listB = listType(B);
+  const listC = listType(C);
   const f = v("f");
   const g = v("g");
   const xs = v("xs");
   const x = v("x");
   const ih = v("ih");
-  const composed = apps(c("compose"), f, g);
-  const mappedComposition = (value: Term): Term => apps(c("map"), composed, value);
-  const mappedTwice = (value: Term): Term => apps(c("map"), f, apps(c("map"), g, value));
-  const proposition = (value: Term): Term => equal(list, mappedComposition(value), mappedTwice(value));
-  const motive = lambda("value", list, proposition(v("value")));
+  // f : B → C, g : A → B, so compose A B C f g : A → C, map (compose) : List A → List C.
+  const map = (elemFrom: Term, elemTo: Term, fn: Term, value: Term): Term => apps(c("map"), elemFrom, elemTo, fn, value);
+  const composed = apps(c("compose"), A, B, C, f, g);
+  const mappedComposition = (value: Term): Term => map(A, C, composed, value);
+  const mappedTwice = (value: Term): Term => map(B, C, f, map(A, B, g, value));
+  const proposition = (value: Term): Term => equal(listC, mappedComposition(value), mappedTwice(value));
+  const motive = lambda("value", listA, proposition(v("value")));
 
-  const lhsNil = mappedComposition(c("nil"));
-  const rhsNil = mappedTwice(c("nil"));
-  const mapFNil = apps(c("map"), f, c("nil"));
+  const lhsNil = mappedComposition(nilAt(A));
+  const rhsNil = mappedTwice(nilAt(A));
+  const mapFNil = map(B, C, f, nilAt(B));
+  const mapFPartial = apps(c("map"), B, C, f);
   const rhsNilToMapFNil = congr(
-    list, list, apps(c("map"), f), apps(c("map"), g, c("nil")), c("nil"), apps(c("map_nil"), g),
+    listB, listC, mapFPartial, map(A, B, g, nilAt(A)), nilAt(B), apps(c("map_nil"), A, B, g),
   );
-  const rhsNilToNil = trans(list, rhsNil, mapFNil, c("nil"), rhsNilToMapFNil, apps(c("map_nil"), f));
+  const rhsNilToNil = trans(listC, rhsNil, mapFNil, nilAt(C), rhsNilToMapFNil, apps(c("map_nil"), B, C, f));
   const nilCase = trans(
-    list,
+    listC,
     lhsNil,
-    c("nil"),
+    nilAt(C),
     rhsNil,
-    apps(c("map_nil"), composed),
-    symm(list, rhsNil, c("nil"), rhsNilToNil),
+    apps(c("map_nil"), A, C, composed),
+    symm(listC, rhsNil, nilAt(C), rhsNilToNil),
   );
 
-  const consXs = apps(c("cons"), x, xs);
+  const consXs = consAt(A, x, xs);
   const lhs = mappedComposition(consXs);
   const composedX = app(composed, x);
   const fgX = app(f, app(g, x));
   const mapComposedXs = mappedComposition(xs);
   const mapTwiceXs = mappedTwice(xs);
-  const afterMapCons = apps(c("cons"), composedX, mapComposedXs);
-  const afterHead = apps(c("cons"), fgX, mapComposedXs);
-  const common = apps(c("cons"), fgX, mapTwiceXs);
+  const afterMapCons = consAt(C, composedX, mapComposedXs);
+  const afterHead = consAt(C, fgX, mapComposedXs);
+  const common = consAt(C, fgX, mapTwiceXs);
   const rhs = mappedTwice(consXs);
 
   const headStep = congr(
-    elem,
-    list,
-    lambda("head", elem, apps(c("cons"), v("head"), mapComposedXs)),
+    C,
+    listC,
+    lambda("head", C, consAt(C, v("head"), mapComposedXs)),
     composedX,
     fgX,
-    apps(c("compose_apply"), f, g, x),
+    apps(c("compose_apply"), A, B, C, f, g, x),
   );
   const tailStep = congr(
-    list,
-    list,
-    lambda("tail", list, apps(c("cons"), fgX, v("tail"))),
+    listC,
+    listC,
+    lambda("tail", listC, consAt(C, fgX, v("tail"))),
     mapComposedXs,
     mapTwiceXs,
     ih,
   );
-  const mapGCons = apps(c("map_cons"), g, x, xs);
+  const mapGCons = apps(c("map_cons"), A, B, g, x, xs);
   const rhsToMapFCons = congr(
-    list,
-    list,
-    apps(c("map"), f),
-    apps(c("map"), g, consXs),
-    apps(c("cons"), app(g, x), apps(c("map"), g, xs)),
+    listB,
+    listC,
+    mapFPartial,
+    map(A, B, g, consXs),
+    consAt(B, app(g, x), map(A, B, g, xs)),
     mapGCons,
   );
   const rhsToCommon = trans(
-    list,
+    listC,
     rhs,
-    apps(c("map"), f, apps(c("cons"), app(g, x), apps(c("map"), g, xs))),
+    map(B, C, f, consAt(B, app(g, x), map(A, B, g, xs))),
     common,
     rhsToMapFCons,
-    apps(c("map_cons"), f, app(g, x), apps(c("map"), g, xs)),
+    apps(c("map_cons"), B, C, f, app(g, x), map(A, B, g, xs)),
   );
   const consCaseBody = trans(
-    list,
+    listC,
     lhs,
     afterMapCons,
     rhs,
-    apps(c("map_cons"), composed, x, xs),
+    apps(c("map_cons"), A, C, composed, x, xs),
     trans(
-      list,
+      listC,
       afterMapCons,
       afterHead,
       rhs,
       headStep,
-      trans(list, afterHead, common, rhs, tailStep, symm(list, rhs, common, rhsToCommon)),
+      trans(listC, afterHead, common, rhs, tailStep, symm(listC, rhs, common, rhsToCommon)),
     ),
   );
-  const consCase = lambda("x", elem, lambda("xs", list, lambda("ih", proposition(xs), consCaseBody)));
+  const consCase = lambda("x", A, lambda("xs", listA, lambda("ih", proposition(xs), consCaseBody)));
 
-  const theoremType = pi("f", fn, pi("g", fn, pi("xs", list, proposition(xs))));
-  const proof = lambda(
-    "f",
-    fn,
-    lambda("g", fn, apps(c("list_induction"), motive, nilCase, consCase)),
-  );
+  const theoremType = pis([["A", type(0)], ["B", type(0)], ["C", type(0)], ["f", arrow(B, C)], ["g", arrow(A, B)], ["xs", listA]], proposition(xs));
+  const proof = lambdas([["A", type(0)], ["B", type(0)], ["C", type(0)], ["f", arrow(B, C)], ["g", arrow(A, B)]],
+    apps(c("list_induction"), A, motive, nilCase, consCase));
   return { type: theoremType, term: proof };
 }
 
@@ -501,7 +578,6 @@ export function addCommProof(): { readonly type: Term; readonly term: Term } {
   const succ = (value: Term): Term => app(c("succ"), value);
   const proposition = (value: Term): Term => equal(nat, add(value, b), add(b, value));
   const motive = lambda("a", nat, proposition(v("a")));
-  // base: 0 + b = b + 0.  LHS = b (add_zero_left); RHS = b (add_zero_right).
   const base = trans(
     nat,
     add(c("zero"), b),
@@ -511,7 +587,6 @@ export function addCommProof(): { readonly type: Term; readonly term: Term } {
     symm(nat, add(b, c("zero")), b, apps(c("add_zero_right"), b)),
   );
   const succA = succ(a);
-  // step: S a + b = b + S a.  LHS = S(a + b) (add_succ_left), congr succ ih -> S(b + a); RHS = S(b + a) (add_succ_right b a).
   const successorCase = lambda("a", nat, lambda("ih", proposition(a), trans(
     nat,
     add(succA, b),
@@ -534,56 +609,55 @@ export function addCommProof(): { readonly type: Term; readonly term: Term } {
 }
 
 export function lengthAppendProof(): { readonly type: Term; readonly term: Term } {
-  const list = c("List");
+  const A = v("A");
+  const list = listType(A);
   const nat = c("Nat");
   const ys = v("ys");
   const x = v("x");
   const xs = v("xs");
   const ih = v("ih");
-  const len = (value: Term): Term => app(c("length"), value);
+  const nil = nilAt(A);
+  const cons = (head: Term, rest: Term): Term => consAt(A, head, rest);
+  const len = (value: Term): Term => apps(c("length"), A, value);
   const add = (left: Term, right: Term): Term => apps(c("add"), left, right);
-  const append = (left: Term, right: Term): Term => apps(c("append"), left, right);
+  const append = (left: Term, right: Term): Term => apps(c("append"), A, left, right);
   const succ = (value: Term): Term => app(c("succ"), value);
   const proposition = (value: Term): Term => equal(nat, len(append(value, ys)), add(len(value), len(ys)));
   const motive = lambda("xs", list, proposition(v("xs")));
-  // base: length ([] ++ ys) = length [] + length ys.
-  // LHS: length([] ++ ys) = length ys (append_nil_left, congr length). RHS: length [] + length ys = 0 + length ys = length ys.
   const base = trans(
     nat,
-    len(append(c("nil"), ys)),
+    len(append(nil, ys)),
     len(ys),
-    add(len(c("nil")), len(ys)),
-    congr(list, nat, c("length"), append(c("nil"), ys), ys, apps(c("append_nil_left"), ys)),
+    add(len(nil), len(ys)),
+    congr(list, nat, apps(c("length"), A), append(nil, ys), ys, apps(c("append_nil_left"), A, ys)),
     symm(
       nat,
-      add(len(c("nil")), len(ys)),
+      add(len(nil), len(ys)),
       len(ys),
       trans(
         nat,
-        add(len(c("nil")), len(ys)),
+        add(len(nil), len(ys)),
         add(c("zero"), len(ys)),
         len(ys),
-        congr(nat, nat, lambda("front", nat, add(v("front"), len(ys))), len(c("nil")), c("zero"), c("length_nil")),
+        congr(nat, nat, lambda("front", nat, add(v("front"), len(ys))), len(nil), c("zero"), apps(c("length_nil"), A)),
         apps(c("add_zero_left"), len(ys)),
       ),
     ),
   );
-  const consXs = apps(c("cons"), x, xs);
-  // step. LHS: length((x::xs) ++ ys) = length(x :: (xs ++ ys)) = S(length(xs ++ ys)) = S(length xs + length ys).
-  //       RHS: length(x::xs) + length ys = S(length xs) + length ys = S(length xs + length ys).
+  const consXs = cons(x, xs);
   const common = succ(add(len(xs), len(ys)));
   const leftChain = trans(
     nat,
     len(append(consXs, ys)),
-    len(apps(c("cons"), x, append(xs, ys))),
+    len(cons(x, append(xs, ys))),
     common,
-    congr(list, nat, c("length"), append(consXs, ys), apps(c("cons"), x, append(xs, ys)), apps(c("append_cons_left"), x, xs, ys)),
+    congr(list, nat, apps(c("length"), A), append(consXs, ys), cons(x, append(xs, ys)), apps(c("append_cons_left"), A, x, xs, ys)),
     trans(
       nat,
-      len(apps(c("cons"), x, append(xs, ys))),
+      len(cons(x, append(xs, ys))),
       succ(len(append(xs, ys))),
       common,
-      apps(c("length_cons"), x, append(xs, ys)),
+      apps(c("length_cons"), A, x, append(xs, ys)),
       congr(nat, nat, c("succ"), len(append(xs, ys)), add(len(xs), len(ys)), ih),
     ),
   );
@@ -592,40 +666,37 @@ export function lengthAppendProof(): { readonly type: Term; readonly term: Term 
     add(len(consXs), len(ys)),
     add(succ(len(xs)), len(ys)),
     common,
-    congr(nat, nat, lambda("front", nat, add(v("front"), len(ys))), len(consXs), succ(len(xs)), apps(c("length_cons"), x, xs)),
+    congr(nat, nat, lambda("front", nat, add(v("front"), len(ys))), len(consXs), succ(len(xs)), apps(c("length_cons"), A, x, xs)),
     apps(c("add_succ_left"), len(xs), len(ys)),
   );
-  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs),
+  const step = lambda("x", A, lambda("xs", list, lambda("ih", proposition(xs),
     trans(nat, len(append(consXs, ys)), common, add(len(consXs), len(ys)), leftChain, symm(nat, add(len(consXs), len(ys)), common, rhsToCommon)))));
   return {
-    type: pis([["xs", list], ["ys", list]], proposition(v("xs"))),
-    term: lambda("xs", list, lambda("ys", list, apps(c("list_induction"), motive, base, step, v("xs")))),
+    type: pis([["A", type(0)], ["xs", list], ["ys", list]], proposition(v("xs"))),
+    term: lambdas([["A", type(0)], ["xs", list], ["ys", list]], apps(c("list_induction"), A, motive, base, step, v("xs"))),
   };
 }
 
 export function lengthRevProof(): { readonly type: Term; readonly term: Term } {
-  const list = c("List");
+  const A = v("A");
+  const list = listType(A);
   const nat = c("Nat");
   const x = v("x");
   const xs = v("xs");
   const ih = v("ih");
-  const len = (value: Term): Term => app(c("length"), value);
-  const rev = (value: Term): Term => app(c("rev"), value);
+  const nil = nilAt(A);
+  const cons = (head: Term, rest: Term): Term => consAt(A, head, rest);
+  const len = (value: Term): Term => apps(c("length"), A, value);
+  const rev = (value: Term): Term => apps(c("rev"), A, value);
   const add = (left: Term, right: Term): Term => apps(c("add"), left, right);
-  const append = (left: Term, right: Term): Term => apps(c("append"), left, right);
+  const append = (left: Term, right: Term): Term => apps(c("append"), A, left, right);
   const succ = (value: Term): Term => app(c("succ"), value);
-  const singleton = apps(c("cons"), x, c("nil"));
+  const singleton = cons(x, nil);
   const proposition = (value: Term): Term => equal(nat, len(rev(value)), len(value));
   const motive = lambda("xs", list, proposition(v("xs")));
-  // base: length (rev []) = length [].  rev [] = [] so refl.
-  const base = refl(len(rev(c("nil"))));
-  const consXs = apps(c("cons"), x, xs);
-  // step. LHS: length(rev(x::xs)) = length(rev xs ++ [x]) = length(rev xs) + length [x]
-  //         = length xs + length [x] (ih) = length xs + S 0 = length xs + S(length []) ... = S(length xs).
-  //       RHS: length(x::xs) = S(length xs).
-  // Use length_append: length(rev xs ++ [x]) = length(rev xs) + length [x].
-  // length [x] = S(length []) = S 0.  add(length xs, S 0) = S(add(length xs, 0)) = S(length xs) via add_succ_right + add_zero_right.
-  const lenSingleton = succ(len(c("nil")));
+  const base = refl(len(rev(nil)));
+  const consXs = cons(x, xs);
+  const lenSingleton = succ(len(nil));
   const afterRevCons = len(append(rev(xs), singleton));
   const afterLengthAppend = add(len(rev(xs)), len(singleton));
   const afterIH = add(len(xs), len(singleton));
@@ -635,32 +706,31 @@ export function lengthRevProof(): { readonly type: Term; readonly term: Term } {
     len(rev(consXs)),
     afterRevCons,
     target,
-    congr(list, nat, c("length"), rev(consXs), append(rev(xs), singleton), apps(c("rev_cons"), x, xs)),
+    congr(list, nat, apps(c("length"), A), rev(consXs), append(rev(xs), singleton), apps(c("rev_cons"), A, x, xs)),
     trans(
       nat,
       afterRevCons,
       afterLengthAppend,
       target,
-      apps(c("length_append"), rev(xs), singleton),
+      apps(c("length_append"), A, rev(xs), singleton),
       trans(
         nat,
         afterLengthAppend,
         afterIH,
         target,
         congr(nat, nat, lambda("front", nat, add(v("front"), len(singleton))), len(rev(xs)), len(xs), ih),
-        // add(len xs, length [x]) -> add(len xs, S 0) -> S(add(len xs, 0)) -> S(len xs)
         trans(
           nat,
           afterIH,
           add(len(xs), lenSingleton),
           target,
-          congr(nat, nat, lambda("back", nat, add(len(xs), v("back"))), len(singleton), lenSingleton, apps(c("length_cons"), x, c("nil"))),
+          congr(nat, nat, lambda("back", nat, add(len(xs), v("back"))), len(singleton), lenSingleton, apps(c("length_cons"), A, x, nil)),
           trans(
             nat,
             add(len(xs), lenSingleton),
             add(len(xs), succ(c("zero"))),
             target,
-            congr(nat, nat, lambda("back", nat, add(len(xs), v("back"))), lenSingleton, succ(c("zero")), congr(nat, nat, c("succ"), len(c("nil")), c("zero"), c("length_nil"))),
+            congr(nat, nat, lambda("back", nat, add(len(xs), v("back"))), lenSingleton, succ(c("zero")), congr(nat, nat, c("succ"), len(nil), c("zero"), apps(c("length_nil"), A))),
             trans(
               nat,
               add(len(xs), succ(c("zero"))),
@@ -674,83 +744,86 @@ export function lengthRevProof(): { readonly type: Term; readonly term: Term } {
       ),
     ),
   );
-  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs),
-    trans(nat, len(rev(consXs)), target, len(consXs), leftChain, symm(nat, len(consXs), target, apps(c("length_cons"), x, xs))))));
+  const step = lambda("x", A, lambda("xs", list, lambda("ih", proposition(xs),
+    trans(nat, len(rev(consXs)), target, len(consXs), leftChain, symm(nat, len(consXs), target, apps(c("length_cons"), A, x, xs))))));
   return {
-    type: pis([["xs", list]], proposition(v("xs"))),
-    term: lambda("xs", list, apps(c("list_induction"), motive, base, step, v("xs"))),
+    type: pis([["A", type(0)], ["xs", list]], proposition(v("xs"))),
+    term: lambdas([["A", type(0)], ["xs", list]], apps(c("list_induction"), A, motive, base, step, v("xs"))),
   };
 }
 
 export function mapLengthProof(): { readonly type: Term; readonly term: Term } {
-  const list = c("List");
+  const A = v("A");
+  const B = v("B");
+  const listA = listType(A);
   const nat = c("Nat");
-  const fnType = arrow(c("Elem"), c("Elem"));
   const f = v("f");
   const x = v("x");
   const xs = v("xs");
   const ih = v("ih");
-  const len = (value: Term): Term => app(c("length"), value);
-  const mapF = (value: Term): Term => apps(c("map"), f, value);
+  const lenA = (value: Term): Term => apps(c("length"), A, value);
+  const lenB = (value: Term): Term => apps(c("length"), B, value);
+  const mapF = (value: Term): Term => apps(c("map"), A, B, f, value);
   const succ = (value: Term): Term => app(c("succ"), value);
-  const proposition = (value: Term): Term => equal(nat, len(mapF(value)), len(value));
-  const motive = lambda("xs", list, proposition(v("xs")));
-  // base: length (map f []) = length [].  map f [] = [] so refl.
-  const base = refl(len(mapF(c("nil"))));
-  const consXs = apps(c("cons"), x, xs);
-  // step. LHS: length(map f (x::xs)) = length(f x :: map f xs) = S(length(map f xs)) = S(length xs) (ih).
-  //       RHS: length(x::xs) = S(length xs).
-  const target = succ(len(xs));
-  const mappedCons = apps(c("cons"), app(f, x), mapF(xs));
+  const proposition = (value: Term): Term => equal(nat, lenB(mapF(value)), lenA(value));
+  const motive = lambda("xs", listA, proposition(v("xs")));
+  const base = refl(lenB(mapF(nilAt(A))));
+  const consXs = consAt(A, x, xs);
+  const target = succ(lenA(xs));
+  const mappedCons = consAt(B, app(f, x), mapF(xs));
   const leftChain = trans(
     nat,
-    len(mapF(consXs)),
-    len(mappedCons),
+    lenB(mapF(consXs)),
+    lenB(mappedCons),
     target,
-    congr(list, nat, c("length"), mapF(consXs), mappedCons, apps(c("map_cons"), f, x, xs)),
+    congr(listType(B), nat, apps(c("length"), B), mapF(consXs), mappedCons, apps(c("map_cons"), A, B, f, x, xs)),
     trans(
       nat,
-      len(mappedCons),
-      succ(len(mapF(xs))),
+      lenB(mappedCons),
+      succ(lenB(mapF(xs))),
       target,
-      apps(c("length_cons"), app(f, x), mapF(xs)),
-      congr(nat, nat, c("succ"), len(mapF(xs)), len(xs), ih),
+      apps(c("length_cons"), B, app(f, x), mapF(xs)),
+      congr(nat, nat, c("succ"), lenB(mapF(xs)), lenA(xs), ih),
     ),
   );
-  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs),
-    trans(nat, len(mapF(consXs)), target, len(consXs), leftChain, symm(nat, len(consXs), target, apps(c("length_cons"), x, xs))))));
+  const step = lambda("x", A, lambda("xs", listA, lambda("ih", proposition(xs),
+    trans(nat, lenB(mapF(consXs)), target, lenA(consXs), leftChain, symm(nat, lenA(consXs), target, apps(c("length_cons"), A, x, xs))))));
   return {
-    type: pis([["f", fnType], ["xs", list]], proposition(v("xs"))),
-    term: lambda("f", fnType, lambda("xs", list, apps(c("list_induction"), motive, base, step, v("xs")))),
+    type: pis([["A", type(0)], ["B", type(0)], ["f", arrow(A, B)], ["xs", listA]], proposition(v("xs"))),
+    term: lambdas([["A", type(0)], ["B", type(0)], ["f", arrow(A, B)]], apps(c("list_induction"), A, motive, base, step)),
   };
 }
 
 export function appendNilRightProof(): { readonly type: Term; readonly term: Term } {
-  const list = c("List");
-  const proposition = (value: Term): Term => equal(list, apps(c("append"), value, c("nil")), value);
+  const A = v("A");
+  const list = listType(A);
+  const nil = nilAt(A);
+  const cons = (head: Term, rest: Term): Term => consAt(A, head, rest);
+  const append = (left: Term, right: Term): Term => apps(c("append"), A, left, right);
+  const proposition = (value: Term): Term => equal(list, append(value, nil), value);
   const motive = lambda("xs", list, proposition(v("xs")));
   const x = v("x");
   const xs = v("xs");
   const ih = v("ih");
-  const consXs = apps(c("cons"), x, xs);
-  const successorCase = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs), trans(
+  const consXs = cons(x, xs);
+  const successorCase = lambda("x", A, lambda("xs", list, lambda("ih", proposition(xs), trans(
     list,
-    apps(c("append"), consXs, c("nil")),
-    apps(c("cons"), x, apps(c("append"), xs, c("nil"))),
+    append(consXs, nil),
+    cons(x, append(xs, nil)),
     consXs,
-    apps(c("append_cons_left"), x, xs, c("nil")),
+    apps(c("append_cons_left"), A, x, xs, nil),
     congr(
       list,
       list,
-      lambda("tail", list, apps(c("cons"), x, v("tail"))),
-      apps(c("append"), xs, c("nil")),
+      lambda("tail", list, cons(x, v("tail"))),
+      append(xs, nil),
       xs,
       ih,
     ),
   ))));
   return {
-    type: pi("xs", list, proposition(v("xs"))),
-    term: apps(c("list_induction"), motive, apps(c("append_nil_left"), c("nil")), successorCase),
+    type: pis([["A", type(0)], ["xs", list]], proposition(v("xs"))),
+    term: lambdas([["A", type(0)]], apps(c("list_induction"), A, motive, apps(c("append_nil_left"), A, nil), successorCase)),
   };
 }
 
@@ -795,136 +868,146 @@ export function natAdditionExampleProof(): { readonly type: Term; readonly term:
 }
 
 export function mapAppendProof(): { readonly type: Term; readonly term: Term } {
-  const list = c("List");
-  const fnType = arrow(c("Elem"), c("Elem"));
+  const A = v("A");
+  const B = v("B");
+  const listA = listType(A);
+  const listB = listType(B);
   const f = v("f");
   const ys = v("ys");
   const x = v("x");
   const xs = v("xs");
   const ih = v("ih");
-  const mapF = apps(c("map"), f);
+  const map = (value: Term): Term => apps(c("map"), A, B, f, value);
+  const appendA = (left: Term, right: Term): Term => apps(c("append"), A, left, right);
+  const appendB = (left: Term, right: Term): Term => apps(c("append"), B, left, right);
   const proposition = (value: Term): Term => equal(
-    list,
-    apps(c("map"), f, apps(c("append"), value, ys)),
-    apps(c("append"), apps(c("map"), f, value), apps(c("map"), f, ys)),
+    listB,
+    map(appendA(value, ys)),
+    appendB(map(value), map(ys)),
   );
-  const mapFYs = apps(c("map"), f, ys);
-  const baseLeft = apps(c("map"), f, apps(c("append"), c("nil"), ys));
-  const baseRight = apps(c("append"), apps(c("map"), f, c("nil")), mapFYs);
-  const leftToCommon = congr(list, list, mapF, apps(c("append"), c("nil"), ys), ys, apps(c("append_nil_left"), ys));
+  const mapFYs = map(ys);
+  const baseLeft = map(appendA(nilAt(A), ys));
+  const baseRight = appendB(map(nilAt(A)), mapFYs);
+  const leftToCommon = congr(listA, listB, apps(c("map"), A, B, f), appendA(nilAt(A), ys), ys, apps(c("append_nil_left"), A, ys));
   const rightToAppendNil = congr(
-    list, list, lambda("head", list, apps(c("append"), v("head"), mapFYs)),
-    apps(c("map"), f, c("nil")), c("nil"), apps(c("map_nil"), f),
+    listB, listB, lambda("head", listB, appendB(v("head"), mapFYs)),
+    map(nilAt(A)), nilAt(B), apps(c("map_nil"), A, B, f),
   );
   const baseRightToCommon = trans(
-    list, baseRight, apps(c("append"), c("nil"), mapFYs), mapFYs,
-    rightToAppendNil, apps(c("append_nil_left"), mapFYs),
+    listB, baseRight, appendB(nilAt(B), mapFYs), mapFYs,
+    rightToAppendNil, apps(c("append_nil_left"), B, mapFYs),
   );
-  const base = trans(list, baseLeft, mapFYs, baseRight, leftToCommon, symm(list, baseRight, mapFYs, baseRightToCommon));
+  const base = trans(listB, baseLeft, mapFYs, baseRight, leftToCommon, symm(listB, baseRight, mapFYs, baseRightToCommon));
 
-  const consXs = apps(c("cons"), x, xs);
-  const appended = apps(c("append"), xs, ys);
-  const lhs = apps(c("map"), f, apps(c("append"), consXs, ys));
-  const afterAppend = apps(c("map"), f, apps(c("cons"), x, appended));
-  const afterMap = apps(c("cons"), app(f, x), apps(c("map"), f, appended));
-  const common = apps(c("cons"), app(f, x), apps(c("append"), apps(c("map"), f, xs), mapFYs));
-  const rhs = apps(c("append"), apps(c("map"), f, consXs), mapFYs);
-  const rhsAfterMap = apps(c("append"), apps(c("cons"), app(f, x), apps(c("map"), f, xs)), mapFYs);
+  const consXs = consAt(A, x, xs);
+  const appended = appendA(xs, ys);
+  const lhs = map(appendA(consXs, ys));
+  const afterAppend = map(consAt(A, x, appended));
+  const afterMap = consAt(B, app(f, x), map(appended));
+  const common = consAt(B, app(f, x), appendB(map(xs), mapFYs));
+  const rhs = appendB(map(consXs), mapFYs);
+  const rhsAfterMap = appendB(consAt(B, app(f, x), map(xs)), mapFYs);
   const leftChain = trans(
-    list, lhs, afterAppend, common,
-    congr(list, list, mapF, apps(c("append"), consXs, ys), apps(c("cons"), x, appended), apps(c("append_cons_left"), x, xs, ys)),
+    listB, lhs, afterAppend, common,
+    congr(listA, listB, apps(c("map"), A, B, f), appendA(consXs, ys), consAt(A, x, appended), apps(c("append_cons_left"), A, x, xs, ys)),
     trans(
-      list, afterAppend, afterMap, common,
-      apps(c("map_cons"), f, x, appended),
+      listB, afterAppend, afterMap, common,
+      apps(c("map_cons"), A, B, f, x, appended),
       congr(
-        list, list, lambda("tail", list, apps(c("cons"), app(f, x), v("tail"))),
-        apps(c("map"), f, appended), apps(c("append"), apps(c("map"), f, xs), mapFYs), ih,
+        listB, listB, lambda("tail", listB, consAt(B, app(f, x), v("tail"))),
+        map(appended), appendB(map(xs), mapFYs), ih,
       ),
     ),
   );
   const rightToCommon = trans(
-    list, rhs, rhsAfterMap, common,
+    listB, rhs, rhsAfterMap, common,
     congr(
-      list, list, lambda("front", list, apps(c("append"), v("front"), mapFYs)),
-      apps(c("map"), f, consXs), apps(c("cons"), app(f, x), apps(c("map"), f, xs)), apps(c("map_cons"), f, x, xs),
+      listB, listB, lambda("front", listB, appendB(v("front"), mapFYs)),
+      map(consXs), consAt(B, app(f, x), map(xs)), apps(c("map_cons"), A, B, f, x, xs),
     ),
-    apps(c("append_cons_left"), app(f, x), apps(c("map"), f, xs), mapFYs),
+    apps(c("append_cons_left"), B, app(f, x), map(xs), mapFYs),
   );
-  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs),
-    trans(list, lhs, common, rhs, leftChain, symm(list, rhs, common, rightToCommon)))));
-  const motive = lambda("xs", list, proposition(v("xs")));
+  const step = lambda("x", A, lambda("xs", listA, lambda("ih", proposition(xs),
+    trans(listB, lhs, common, rhs, leftChain, symm(listB, rhs, common, rightToCommon)))));
+  const motive = lambda("xs", listA, proposition(v("xs")));
   return {
-    type: pi("f", fnType, pi("ys", list, pi("xs", list, proposition(v("xs"))))),
-    term: lambda("f", fnType, lambda("ys", list, apps(c("list_induction"), motive, base, step))),
+    type: pis([["A", type(0)], ["B", type(0)], ["f", arrow(A, B)], ["ys", listA], ["xs", listA]], proposition(v("xs"))),
+    term: lambdas([["A", type(0)], ["B", type(0)], ["f", arrow(A, B)], ["ys", listA]], apps(c("list_induction"), A, motive, base, step)),
   };
 }
 
 export function revAppendProof(): { readonly type: Term; readonly term: Term } {
-  const list = c("List");
+  const A = v("A");
+  const list = listType(A);
   const ys = v("ys");
   const x = v("x");
   const xs = v("xs");
   const ih = v("ih");
-  const rev = (value: Term): Term => app(c("rev"), value);
-  const append = (left: Term, right: Term): Term => apps(c("append"), left, right);
+  const nil = nilAt(A);
+  const cons = (head: Term, rest: Term): Term => consAt(A, head, rest);
+  const rev = (value: Term): Term => apps(c("rev"), A, value);
+  const append = (left: Term, right: Term): Term => apps(c("append"), A, left, right);
   const proposition = (value: Term): Term => equal(list, rev(append(value, ys)), append(rev(ys), rev(value)));
-  const baseLhs = rev(append(c("nil"), ys));
-  const baseRhs = append(rev(ys), rev(c("nil")));
-  const baseLeft = congr(list, list, c("rev"), append(c("nil"), ys), ys, apps(c("append_nil_left"), ys));
+  const baseLhs = rev(append(nil, ys));
+  const baseRhs = append(rev(ys), rev(nil));
+  const baseLeft = congr(list, list, apps(c("rev"), A), append(nil, ys), ys, apps(c("append_nil_left"), A, ys));
   const baseRight = trans(
-    list, baseRhs, append(rev(ys), c("nil")), rev(ys),
-    congr(list, list, lambda("tail", list, append(rev(ys), v("tail"))), rev(c("nil")), c("nil"), c("rev_nil")),
-    apps(c("append_nil_right"), rev(ys)),
+    list, baseRhs, append(rev(ys), nil), rev(ys),
+    congr(list, list, lambda("tail", list, append(rev(ys), v("tail"))), rev(nil), nil, apps(c("rev_nil"), A)),
+    apps(c("append_nil_right"), A, rev(ys)),
   );
   const base = trans(list, baseLhs, rev(ys), baseRhs, baseLeft, symm(list, baseRhs, rev(ys), baseRight));
 
-  const singleton = apps(c("cons"), x, c("nil"));
-  const consXs = apps(c("cons"), x, xs);
+  const singleton = cons(x, nil);
+  const consXs = cons(x, xs);
   const lhs = rev(append(consXs, ys));
-  const afterAppend = rev(apps(c("cons"), x, append(xs, ys)));
+  const afterAppend = rev(cons(x, append(xs, ys)));
   const afterRev = append(rev(append(xs, ys)), singleton);
   const afterIH = append(append(rev(ys), rev(xs)), singleton);
   const common = append(rev(ys), append(rev(xs), singleton));
   const rhs = append(rev(ys), rev(consXs));
   const leftChain = trans(
     list, lhs, afterAppend, common,
-    congr(list, list, c("rev"), append(consXs, ys), apps(c("cons"), x, append(xs, ys)), apps(c("append_cons_left"), x, xs, ys)),
+    congr(list, list, apps(c("rev"), A), append(consXs, ys), cons(x, append(xs, ys)), apps(c("append_cons_left"), A, x, xs, ys)),
     trans(
-      list, afterAppend, afterRev, common, apps(c("rev_cons"), x, append(xs, ys)),
+      list, afterAppend, afterRev, common, apps(c("rev_cons"), A, x, append(xs, ys)),
       trans(
         list, afterRev, afterIH, common,
         congr(list, list, lambda("front", list, append(v("front"), singleton)), rev(append(xs, ys)), append(rev(ys), rev(xs)), ih),
-        apps(c("append_assoc"), rev(ys), rev(xs), singleton),
+        apps(c("append_assoc"), A, rev(ys), rev(xs), singleton),
       ),
     ),
   );
   const rightToCommon = congr(
     list, list, lambda("tail", list, append(rev(ys), v("tail"))),
-    rev(consXs), append(rev(xs), singleton), apps(c("rev_cons"), x, xs),
+    rev(consXs), append(rev(xs), singleton), apps(c("rev_cons"), A, x, xs),
   );
-  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs),
+  const step = lambda("x", A, lambda("xs", list, lambda("ih", proposition(xs),
     trans(list, lhs, common, rhs, leftChain, symm(list, rhs, common, rightToCommon)))));
   const motive = lambda("xs", list, proposition(v("xs")));
   return {
-    type: pi("xs", list, pi("ys", list, proposition(v("xs")))),
-    term: lambda("xs", list, lambda("ys", list, apps(c("list_induction"), motive, base, step, v("xs")))),
+    type: pis([["A", type(0)], ["xs", list], ["ys", list]], proposition(v("xs"))),
+    term: lambdas([["A", type(0)], ["xs", list], ["ys", list]], apps(c("list_induction"), A, motive, base, step, v("xs"))),
   };
 }
 
 export function revInvolutionProof(): { readonly type: Term; readonly term: Term } {
-  const list = c("List");
+  const A = v("A");
+  const list = listType(A);
   const x = v("x");
   const xs = v("xs");
   const ih = v("ih");
-  const rev = (value: Term): Term => app(c("rev"), value);
-  const append = (left: Term, right: Term): Term => apps(c("append"), left, right);
+  const nil = nilAt(A);
+  const cons = (head: Term, rest: Term): Term => consAt(A, head, rest);
+  const rev = (value: Term): Term => apps(c("rev"), A, value);
+  const append = (left: Term, right: Term): Term => apps(c("append"), A, left, right);
   const proposition = (value: Term): Term => equal(list, rev(rev(value)), value);
   const base = trans(
-    list, rev(rev(c("nil"))), rev(c("nil")), c("nil"),
-    congr(list, list, c("rev"), rev(c("nil")), c("nil"), c("rev_nil")), c("rev_nil"),
+    list, rev(rev(nil)), rev(nil), nil,
+    congr(list, list, apps(c("rev"), A), rev(nil), nil, apps(c("rev_nil"), A)), apps(c("rev_nil"), A),
   );
-  const singleton = apps(c("cons"), x, c("nil"));
-  const consXs = apps(c("cons"), x, xs);
+  const singleton = cons(x, nil);
+  const consXs = cons(x, xs);
   const lhs = rev(rev(consXs));
   const afterInner = rev(append(rev(xs), singleton));
   const afterRevAppend = append(rev(singleton), rev(rev(xs)));
@@ -932,19 +1015,19 @@ export function revInvolutionProof(): { readonly type: Term; readonly term: Term
   const afterIH = append(singleton, xs);
   const common = consXs;
   const singletonProof = trans(
-    list, rev(singleton), append(rev(c("nil")), singleton), singleton,
-    apps(c("rev_cons"), x, c("nil")),
+    list, rev(singleton), append(rev(nil), singleton), singleton,
+    apps(c("rev_cons"), A, x, nil),
     trans(
-      list, append(rev(c("nil")), singleton), append(c("nil"), singleton), singleton,
-      congr(list, list, lambda("front", list, append(v("front"), singleton)), rev(c("nil")), c("nil"), c("rev_nil")),
-      apps(c("append_nil_left"), singleton),
+      list, append(rev(nil), singleton), append(nil, singleton), singleton,
+      congr(list, list, lambda("front", list, append(v("front"), singleton)), rev(nil), nil, apps(c("rev_nil"), A)),
+      apps(c("append_nil_left"), A, singleton),
     ),
   );
   const chain = trans(
     list, lhs, afterInner, common,
-    congr(list, list, c("rev"), rev(consXs), append(rev(xs), singleton), apps(c("rev_cons"), x, xs)),
+    congr(list, list, apps(c("rev"), A), rev(consXs), append(rev(xs), singleton), apps(c("rev_cons"), A, x, xs)),
     trans(
-      list, afterInner, afterRevAppend, common, apps(c("rev_append"), rev(xs), singleton),
+      list, afterInner, afterRevAppend, common, apps(c("rev_append"), A, rev(xs), singleton),
       trans(
         list, afterRevAppend, afterSingleton, common,
         congr(list, list, lambda("front", list, append(v("front"), rev(rev(xs)))), rev(singleton), singleton, singletonProof),
@@ -952,19 +1035,19 @@ export function revInvolutionProof(): { readonly type: Term; readonly term: Term
           list, afterSingleton, afterIH, common,
           congr(list, list, lambda("tail", list, append(singleton, v("tail"))), rev(rev(xs)), xs, ih),
           trans(
-            list, afterIH, apps(c("cons"), x, append(c("nil"), xs)), common,
-            apps(c("append_cons_left"), x, c("nil"), xs),
-            congr(list, list, lambda("tail", list, apps(c("cons"), x, v("tail"))), append(c("nil"), xs), xs, apps(c("append_nil_left"), xs)),
+            list, afterIH, cons(x, append(nil, xs)), common,
+            apps(c("append_cons_left"), A, x, nil, xs),
+            congr(list, list, lambda("tail", list, cons(x, v("tail"))), append(nil, xs), xs, apps(c("append_nil_left"), A, xs)),
           ),
         ),
       ),
     ),
   );
-  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs), chain)));
+  const step = lambda("x", A, lambda("xs", list, lambda("ih", proposition(xs), chain)));
   const motive = lambda("xs", list, proposition(v("xs")));
   return {
-    type: pi("xs", list, proposition(v("xs"))),
-    term: apps(c("list_induction"), motive, base, step),
+    type: pis([["A", type(0)], ["xs", list]], proposition(v("xs"))),
+    term: lambdas([["A", type(0)]], apps(c("list_induction"), A, motive, base, step)),
   };
 }
 
