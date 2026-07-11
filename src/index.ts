@@ -66,6 +66,8 @@ export { decodeProofSession, decodeServerProofSession } from "./proof/protocol.j
 export type {
   Expr as ProgramExpr,
   Hypothesis as ProofHypothesis,
+  AnalysisBranch,
+  GoalAnalysis,
   EquationGoal,
   ProofStep,
   ProofSession,
@@ -80,11 +82,16 @@ export {
 } from "./proof/definitions.js";
 export type { DefinitionClause, ProgramDefinition, Reduction } from "./proof/definitions.js";
 export { parseProgramExpr, ProgramParseError } from "./proof/ast.js";
+// Operator fixities: the single table that drives parsing AND printing of the
+// proof language's infix operators (precedence, associativity, spelling,
+// spacing). Renderers should parenthesize from this table too.
+export { infixl, infixr, operatorByName, operatorBySymbol, operatorTable } from "./proof/fixity.js";
+export type { Associativity, OperatorFixity } from "./proof/fixity.js";
 export { inductiveByName, inductiveDefinitions, inductiveToScript } from "./proof/inductives.js";
 export type { ConstructorDefinition, ConstructorField, InductiveDefinition } from "./proof/inductives.js";
 // Wadler-style pretty-printing combinators (with annotations) used to lay out
 // proof scripts and definition cards; interfaces build on the same documents.
-export { annotate, cat, group, hardline, line, nest, render, renderSegments, softline, text } from "./proof/doc.js";
+export { annotate, cat, fill, group, hardline, line, nest, render, renderSegments, softline, text } from "./proof/doc.js";
 export type { Doc, Segment } from "./proof/doc.js";
 
 // ---------------------------------------------------------------------------

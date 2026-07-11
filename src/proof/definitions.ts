@@ -15,7 +15,7 @@ export interface ProgramDefinition {
 }
 
 function clause(label: string, patterns: readonly string[], result: string, script: string): DefinitionClause {
-  return { label, patterns: patterns.map(parseProgramExpr), result: parseProgramExpr(result), script };
+  return { label, patterns: patterns.map((pattern) => parseProgramExpr(pattern)), result: parseProgramExpr(result), script };
 }
 
 export const programDefinitions: readonly ProgramDefinition[] = [

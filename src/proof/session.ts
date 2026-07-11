@@ -23,6 +23,22 @@ export interface Hypothesis {
   readonly binders?: readonly { readonly name: string; readonly type: string }[];
 }
 
+/** One branch of an analysis: which obligation it created and which (freshened) constructor fields it introduced. */
+export interface AnalysisBranch {
+  readonly goalId: string;
+  readonly constructorName: string;
+  readonly label: string;
+  readonly fields: readonly { readonly name: string; readonly type: string; readonly recursive?: boolean }[];
+}
+
+/** Recorded on a goal at the moment it is split by cases/induction. */
+export interface GoalAnalysis {
+  readonly kind: "cases" | "induction";
+  readonly variable: string;
+  readonly type: "Bool" | "Nat" | "List";
+  readonly branches: readonly AnalysisBranch[];
+}
+
 export interface EquationGoal {
   readonly id: string;
   readonly label: string;
@@ -33,6 +49,12 @@ export interface EquationGoal {
   readonly right: Expr;
   readonly status: "open" | "solved";
   readonly steps: readonly ProofStep[];
+  /** Variables pulled into the scope of the next induction hypothesis taken from this goal. */
+  readonly generalized: readonly string[];
+  /** The goal this obligation was split from; absent on the root goal. */
+  readonly parentId?: string;
+  /** Present exactly when this goal has been split; its steps and equation are frozen at the split point. */
+  readonly analysis?: GoalAnalysis;
 }
 
 export interface ProofStep {
@@ -49,20 +71,20 @@ export interface ProofSession {
   readonly theoremContext: readonly string[];
   readonly theoremLeft: Expr;
   readonly theoremRight: Expr;
-  readonly analysis?: {
-    readonly kind: "cases" | "induction";
-    readonly variable: string;
-    readonly type: "Bool" | "Nat" | "List";
-  };
+  /** The focused goal's generalized variables (derived from the goal tree; kept for renderers). */
   readonly generalizedVariables: readonly string[];
   readonly definitionNames: readonly string[];
   readonly inductiveNames: readonly string[];
+  /** Extra hypotheses granted to the branches of the FIRST analysis (the split of the root goal), keyed by branch label. */
   readonly branchLemmas?: Readonly<Record<string, readonly {
     readonly id: string;
     readonly name: string;
     readonly left: string;
     readonly right: string;
   }[]>>;
+  /** Goals that have been split, in split order (a parent always precedes its descendants). */
+  readonly ancestors: readonly EquationGoal[];
+  /** The open/solved leaf obligations, in notebook order. */
   readonly goals: readonly EquationGoal[];
   readonly focusedGoalId: string;
   readonly kernelStatus: "pending" | "checked";
@@ -387,6 +409,7 @@ export function createLessonSession(lessonId: string): ProofSession {
   const goal: EquationGoal = {
     id: "goal-root", label: lesson.title, context: spec.context, type: spec.resultType, hypotheses: [], left, right, status: "open",
     steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: "theorem statement", left, right }],
+    generalized: [],
   };
   return {
     lessonId, theorem: spec.theorem, statement: lesson.theorem,
@@ -394,8 +417,35 @@ export function createLessonSession(lessonId: string): ProofSession {
     definitionNames: spec.definitions, inductiveNames: spec.inductives,
     generalizedVariables: [],
     ...(spec.branchLemmas === undefined ? {} : { branchLemmas: spec.branchLemmas }),
-    goals: [goal], focusedGoalId: goal.id, kernelStatus: "pending",
+    ancestors: [], goals: [goal], focusedGoalId: goal.id, kernelStatus: "pending",
   };
+}
+
+/**
+ * Re-derives the state that hangs off the goal tree: ancestor statuses
+ * (a split goal is solved exactly when all of its branches are) and the
+ * focused goal's generalized-variable mirror. Every session returned to a
+ * caller passes through here.
+ */
+export function withDerivedSessionState(session: ProofSession): ProofSession {
+  const statuses = new Map<string, "open" | "solved">(session.goals.map((goal) => [goal.id, goal.status]));
+  let ancestorsChanged = false;
+  const ancestors = [...session.ancestors];
+  for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+    const ancestor = ancestors[index]!;
+    const solved = ancestor.analysis?.branches.every((branch) => statuses.get(branch.goalId) === "solved") === true;
+    const status = solved ? "solved" as const : "open" as const;
+    statuses.set(ancestor.id, status);
+    if (status !== ancestor.status) {
+      ancestors[index] = { ...ancestor, status };
+      ancestorsChanged = true;
+    }
+  }
+  const generalizedVariables = session.goals.find((goal) => goal.id === session.focusedGoalId)?.generalized ?? [];
+  const sameGeneralized = generalizedVariables.length === session.generalizedVariables.length
+    && generalizedVariables.every((name, index) => session.generalizedVariables[index] === name);
+  if (!ancestorsChanged && sameGeneralized) return session;
+  return { ...session, ...(ancestorsChanged ? { ancestors } : {}), generalizedVariables };
 }
 
 export function createMapCompositionSession(): ProofSession {
@@ -406,48 +456,53 @@ export function enumerateProofMoves(session: ProofSession): ProofMove[] {
   const goal = focusedGoal(session);
   if (goal.status === "solved") return [];
   const moves: ProofMove[] = [];
-  if (goal.id === "goal-root" && session.analysis === undefined) {
-    for (const candidate of contextVariables(goal.context)) {
-      const occurrence = [...allExpressions(goal.left), ...allExpressions(goal.right)].find(
-        (expr) => expr.kind === "var" && expr.name === candidate.name,
-      );
-      if (occurrence === undefined) continue;
-      if (candidate.inductive !== undefined && !session.generalizedVariables.includes(candidate.name)) {
-        const inductive = inductiveByName(candidate.inductive);
-        if (inductive?.constructors.some((constructor) => constructor.fields.some((field) => field.recursive === true)) === true) {
-          moves.push({
-            id: `induction:${candidate.name}`,
-            kind: "induction",
-            label: `Induct on ${candidate.name}`,
-            explanation: `Consider every constructor of ${candidate.inductive} and add hypotheses for recursive fields.`,
-            handle: occurrence.id,
-            dropTarget: "analysis-zone",
-            variable: candidate.name,
-            analysisType: candidate.inductive,
-          });
-        }
+  // Structural moves derive purely from the goal's own state: any context
+  // variable of inductive type occurring in the goal may be analyzed, in any
+  // goal, repeatedly — including variables introduced by earlier analyses.
+  for (const candidate of contextVariables(goal.context)) {
+    const occurrence = [...allExpressions(goal.left), ...allExpressions(goal.right)].find(
+      (expr) => expr.kind === "var" && expr.name === candidate.name,
+    );
+    if (occurrence === undefined) continue;
+    if (goal.generalized.includes(candidate.name)) continue;
+    if (candidate.inductive !== undefined) {
+      const inductive = inductiveByName(candidate.inductive);
+      // Induction on a variable that a hypothesis mentions is not offered
+      // (Coq errors with "x is used in hypothesis"; auto-reverting is out of
+      // scope). Case analysis remains available: it instantiates hypotheses.
+      const mentionedInHypotheses = goal.hypotheses.some((hypothesis) => hypothesisMentions(hypothesis, candidate.name));
+      if (!mentionedInHypotheses
+        && inductive?.constructors.some((constructor) => constructor.fields.some((field) => field.recursive === true)) === true) {
         moves.push({
-          id: `cases:${candidate.name}`,
-          kind: "cases",
-          label: `Case analysis on ${candidate.name}`,
-          explanation: `Consider every constructor of ${candidate.inductive}.`,
+          id: `induction:${candidate.name}`,
+          kind: "induction",
+          label: `Induct on ${candidate.name}`,
+          explanation: `Consider every constructor of ${candidate.inductive} and add hypotheses for recursive fields.`,
           handle: occurrence.id,
           dropTarget: "analysis-zone",
           variable: candidate.name,
           analysisType: candidate.inductive,
         });
       }
-      if (!session.generalizedVariables.includes(candidate.name)) {
-        moves.push({
-          id: `generalize:${candidate.name}`,
-          kind: "generalize",
-          label: `Generalize ${candidate.name}`,
-          explanation: `Move ${candidate.name} inside the next induction hypothesis so it can vary in recursive cases.`,
-          handle: occurrence.id,
-          variable: candidate.name,
-        });
-      }
+      moves.push({
+        id: `cases:${candidate.name}`,
+        kind: "cases",
+        label: `Case analysis on ${candidate.name}`,
+        explanation: `Consider every constructor of ${candidate.inductive}.`,
+        handle: occurrence.id,
+        dropTarget: "analysis-zone",
+        variable: candidate.name,
+        analysisType: candidate.inductive,
+      });
     }
+    moves.push({
+      id: `generalize:${candidate.name}`,
+      kind: "generalize",
+      label: `Generalize ${candidate.name}`,
+      explanation: `Move ${candidate.name} inside the next induction hypothesis so it can vary in recursive cases.`,
+      handle: occurrence.id,
+      variable: candidate.name,
+    });
   }
   for (const side of ["left", "right"] as const) {
     for (const expression of allExpressions(goal[side])) {
@@ -500,79 +555,144 @@ function updateGoal(session: ProofSession, nextGoal: EquationGoal): ProofSession
   return { ...session, goals: session.goals.map((goal) => goal.id === nextGoal.id ? nextGoal : goal) };
 }
 
+function contextEntryNames(entry: string): string[] {
+  const separator = entry.indexOf(":");
+  return separator < 1 ? [] : entry.slice(0, separator).split(",").map((name) => name.trim());
+}
+
+function expressionVariables(expr: Expr): string[] {
+  return allExpressions(expr).filter((node) => node.kind === "var").map((node) => node.name);
+}
+
+/** Whether `name` occurs FREE in the hypothesis (occurrences bound by the hypothesis' own binders do not count). */
+export function hypothesisMentions(hypothesis: Hypothesis, name: string): boolean {
+  if (hypothesis.binders?.some((binder) => binder.name === name) === true) return false;
+  return expressionVariables(hypothesis.left).includes(name) || expressionVariables(hypothesis.right).includes(name);
+}
+
+/**
+ * Splits `goal` (a leaf of the tree) into one obligation per constructor of
+ * the analyzed variable's type, in place: the children take the goal's slot
+ * in the notebook, the goal itself is frozen into `session.ancestors`, and
+ * its steps/equation become the split point the certificate composes over.
+ *
+ * Introduced constructor fields are freshened against everything in scope
+ * (context, hypotheses, the goal itself). Hypotheses are inherited — and,
+ * exactly like Coq's `destruct`, every hypothesis that freely mentions the
+ * analyzed variable is INSTANTIATED per branch with the constructor pattern
+ * (the certificate reverts those hypotheses through the recursor motive).
+ * Induction never sees such hypotheses: its move is not offered then.
+ */
+function splitGoal(session: ProofSession, goal: EquationGoal, kind: "cases" | "induction", name: string, analyzedType: "Bool" | "Nat" | "List"): ProofSession {
+  const inductive = inductiveByName(analyzedType);
+  if (inductive === undefined) throw new Error(`unknown inductive type ${analyzedType}`);
+  const hypothesisVariables = new Set(goal.hypotheses.flatMap((hypothesis) => [
+    ...expressionVariables(hypothesis.left),
+    ...expressionVariables(hypothesis.right),
+    ...(hypothesis.binders ?? []).map((binder) => binder.name),
+  ]));
+  const instantiateHypotheses = goal.hypotheses.some((hypothesis) => hypothesisMentions(hypothesis, name));
+  const baseContext = goal.context.filter((entry) => !entry.startsWith(`${name} :`));
+  const usedNames = new Set([
+    ...baseContext.flatMap(contextEntryNames),
+    ...hypothesisVariables,
+    ...expressionVariables(goal.left),
+    ...expressionVariables(goal.right),
+  ]);
+  // When no hypothesis is instantiated the analyzed name is simply consumed
+  // and its spelling may be reused for a field (`cases xs` reintroduces xs).
+  // When hypotheses ARE rewritten, fields freshen away from it so the
+  // instantiation is visible (IH : n + 0 = n becomes IH : S n2 + 0 = S n2).
+  if (!instantiateHypotheses) usedNames.delete(name);
+  let ihName = "IH";
+  for (let suffix = 2; goal.hypotheses.some((hypothesis) => hypothesis.name === ihName); suffix += 1) ihName = `IH${suffix}`;
+  const generalizedBinders = goal.generalized.map((variable) => {
+    const found = contextVariables(goal.context).find((candidate) => candidate.name === variable);
+    if (found === undefined) throw new Error(`cannot generalize unknown variable ${variable}`);
+    return { name: variable, type: found.type };
+  });
+  const children = inductive.constructors.map((constructor, index) => {
+    const taken = new Set(usedNames);
+    const renamedFields = constructor.fields.map((field) => {
+      let fresh = field.name;
+      for (let suffix = 2; taken.has(fresh); suffix += 1) fresh = `${field.name}${suffix}`;
+      taken.add(fresh);
+      return { ...field, name: fresh };
+    });
+    const branchLabel = constructor.label.replace(/[A-Za-z_][A-Za-z0-9_]*/g, (token) => {
+      const fieldIndex = constructor.fields.findIndex((field) => field.name === token);
+      return fieldIndex < 0 ? token : renamedFields[fieldIndex]!.name;
+    });
+    const value = ctor(constructor.name, renamedFields.map((field) => programVar(field.name)));
+    const left = replaceVariable(goal.left, name, value);
+    const right = replaceVariable(goal.right, name, value);
+    // destruct semantics: hypotheses freely mentioning the analyzed variable
+    // receive this branch's constructor pattern (id and name are preserved;
+    // the certificate reverts them through the motive).
+    const inheritedHypotheses = goal.hypotheses.map((hypothesis) => hypothesisMentions(hypothesis, name)
+      ? { ...hypothesis, left: replaceVariable(hypothesis.left, name, value), right: replaceVariable(hypothesis.right, name, value) }
+      : hypothesis);
+    const recursiveField = renamedFields.find((field) => field.recursive === true);
+    const inductionHypotheses: Hypothesis[] = kind === "induction" && recursiveField !== undefined
+      ? [{
+          id: `ih-${recursiveField.name}`,
+          name: ihName,
+          left: replaceVariable(goal.left, name, programVar(recursiveField.name)),
+          right: replaceVariable(goal.right, name, programVar(recursiveField.name)),
+          ...(generalizedBinders.length === 0 ? {} : { binders: generalizedBinders }),
+        }]
+      : [];
+    const configured = goal.id === "goal-root" ? session.branchLemmas?.[branchLabel] ?? [] : [];
+    const lemmas = configured.map((lemma): Hypothesis => ({
+      id: lemma.id,
+      name: lemma.name,
+      left: parseProgramExpr(lemma.left),
+      right: parseProgramExpr(lemma.right),
+    }));
+    const id = goal.id === "goal-root" ? `goal-${index}` : `${goal.id}.${index}`;
+    const label = goal.id === "goal-root" ? branchLabel : `${goal.label} · ${branchLabel}`;
+    const child: EquationGoal = {
+      id,
+      label,
+      context: [...baseContext, ...renamedFields.map((field) => `${field.name} : ${field.type}`)],
+      type: goal.type,
+      hypotheses: [...inheritedHypotheses, ...inductionHypotheses, ...lemmas],
+      left,
+      right,
+      status: "open",
+      steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: `${branchLabel} obligation`, left, right }],
+      generalized: [],
+      parentId: goal.id,
+    };
+    const branch: AnalysisBranch = { goalId: id, constructorName: constructor.name, label: branchLabel, fields: renamedFields };
+    return { child, branch };
+  });
+  const analysis: GoalAnalysis = { kind, variable: name, type: analyzedType, branches: children.map((entry) => entry.branch) };
+  const position = session.goals.findIndex((candidate) => candidate.id === goal.id);
+  if (position < 0) throw new Error("only leaf obligations can be analyzed");
+  return {
+    ...session,
+    ancestors: [...session.ancestors, { ...goal, analysis }],
+    goals: [
+      ...session.goals.slice(0, position),
+      ...children.map((entry) => entry.child),
+      ...session.goals.slice(position + 1),
+    ],
+    focusedGoalId: children[0]!.child.id,
+  };
+}
+
 export function applyProofMove(session: ProofSession, moveId: string): ProofSession {
   const move = enumerateProofMoves(session).find((candidate) => candidate.id === moveId);
   if (move === undefined) throw new Error(`illegal proof move: ${moveId}`);
   const goal = focusedGoal(session);
 
   if (move.kind === "generalize" && move.variable !== undefined) {
-    return { ...session, generalizedVariables: [...session.generalizedVariables, move.variable] };
+    return withDerivedSessionState(updateGoal(session, { ...goal, generalized: [...goal.generalized, move.variable] }));
   }
 
   if ((move.kind === "induction" || move.kind === "cases") && move.variable !== undefined && move.analysisType !== undefined) {
-    const name = move.variable;
-    const analyzedType = move.analysisType;
-    const baseContext = goal.context.filter((entry) => !entry.startsWith(`${name} :`));
-    const inductive = inductiveByName(analyzedType);
-    if (inductive === undefined) throw new Error(`unknown inductive type ${analyzedType}`);
-    const constructors = inductive.constructors.map((constructor) => {
-      const fields = constructor.fields.map((field) => programVar(field.name));
-      const recursiveIndex = constructor.fields.findIndex((field) => field.recursive === true);
-      return {
-        label: constructor.label,
-        value: ctor(constructor.name, fields),
-        context: [...baseContext, ...constructor.fields.map((field) => `${field.name} : ${field.type}`)],
-        ...(recursiveIndex < 0 ? {} : { recursive: fields[recursiveIndex]! }),
-      };
-    });
-    let obligations = constructors.map((branch, index): EquationGoal => {
-      const left = replaceVariable(goal.left, name, branch.value);
-      const right = replaceVariable(goal.right, name, branch.value);
-      const hypotheses = branch.recursive === undefined || move.kind === "cases"
-        ? []
-        : [{
-            id: `ih-${branch.recursive.name}`,
-            name: "IH",
-            left: replaceVariable(goal.left, name, branch.recursive),
-            right: replaceVariable(goal.right, name, branch.recursive),
-            ...(session.generalizedVariables.length === 0 ? {} : {
-              binders: session.generalizedVariables.map((variable) => {
-                const found = contextVariables(goal.context).find((candidate) => candidate.name === variable);
-                if (found === undefined) throw new Error(`cannot generalize unknown variable ${variable}`);
-                return { name: variable, type: found.type };
-              }),
-            }),
-          }];
-      return {
-        id: `goal-${index}`,
-        label: branch.label,
-        context: branch.context,
-        type: goal.type,
-        hypotheses,
-        left,
-        right,
-        status: "open",
-        steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: `${branch.label} obligation`, left, right }],
-      };
-    });
-    obligations = obligations.map((obligation) => {
-      const configured = session.branchLemmas?.[obligation.label] ?? [];
-      return configured.length === 0 ? obligation : {
-        ...obligation,
-        hypotheses: [...obligation.hypotheses, ...configured.map((lemma): Hypothesis => ({
-          id: lemma.id,
-          name: lemma.name,
-          left: parseProgramExpr(lemma.left),
-          right: parseProgramExpr(lemma.right),
-        }))],
-      };
-    });
-    return {
-      ...session,
-      analysis: { kind: move.kind, variable: name, type: analyzedType },
-      goals: obligations,
-      focusedGoalId: obligations[0]!.id,
-    };
+    return withDerivedSessionState(splitGoal(session, goal, move.kind, move.variable, move.analysisType));
   }
 
   if (move.kind === "reduce" && move.side !== undefined && move.targetId !== undefined) {
@@ -611,8 +731,7 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
     const solved = { ...goal, status: "solved" as const, steps: [...goal.steps, { equation: equationToText(goal), reason: "reflexivity", left: goal.left, right: goal.right }] };
     const updated = updateGoal(session, solved);
     const nextOpen = updated.goals.find((candidate) => candidate.status === "open");
-    if (nextOpen !== undefined) return { ...updated, focusedGoalId: nextOpen.id };
-    return updated;
+    return withDerivedSessionState(nextOpen === undefined ? updated : { ...updated, focusedGoalId: nextOpen.id });
   }
 
   throw new Error(`unsupported proof move ${move.kind}`);
@@ -628,5 +747,5 @@ export function markKernelChecked(session: ProofSession): ProofSession {
 
 export function focusGoal(session: ProofSession, goalId: string): ProofSession {
   if (!session.goals.some((goal) => goal.id === goalId)) throw new Error(`unknown obligation ${goalId}`);
-  return { ...session, focusedGoalId: goalId };
+  return withDerivedSessionState({ ...session, focusedGoalId: goalId });
 }

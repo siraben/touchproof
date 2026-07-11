@@ -206,6 +206,37 @@ export function substitute(term: Term, name: string, replacement: Term): Term {
   return go(term);
 }
 
+/** Splits a left-nested application into its head and argument spine. */
+export function applicationSpine(term: Term): { readonly head: Term; readonly args: readonly Term[] } {
+  const args: Term[] = [];
+  let head = term;
+  while (head.kind === "app") {
+    args.unshift(head.arg);
+    head = head.fn;
+  }
+  return { head, args };
+}
+
+/**
+ * Wraps a printed term in parentheses unless it is already unambiguous in a
+ * spine position: variables and constants are atoms, and binders (`λ`, `Π`,
+ * `let`) and equations print their own delimiters.
+ */
+function termToAtomString(term: Term): string {
+  switch (term.kind) {
+    case "var":
+    case "const":
+    case "pi":
+    case "lam":
+    case "let":
+    case "eq":
+      return termToString(term);
+    default:
+      return `(${termToString(term)})`;
+  }
+}
+
+/** Applications print as flattened curried spines: `map f (append nil ys)`. */
 export function termToString(term: Term): string {
   switch (term.kind) {
     case "type": return `Type ${term.level}`;
@@ -214,10 +245,13 @@ export function termToString(term: Term): string {
     case "pi": return `(Π ${term.param} : ${termToString(term.domain)}, ${termToString(term.codomain)})`;
     case "lam": return `(λ ${term.param} : ${termToString(term.paramType)}, ${termToString(term.body)})`;
     case "let": return `(let ${term.name} : ${termToString(term.valueType)} := ${termToString(term.value)}; ${termToString(term.body)})`;
-    case "app": return `(${termToString(term.fn)} ${termToString(term.arg)})`;
+    case "app": {
+      const { head, args } = applicationSpine(term);
+      return `${termToAtomString(head)} ${args.map(termToAtomString).join(" ")}`;
+    }
     case "eq": return `(${termToString(term.left)} = ${termToString(term.right)})`;
-    case "refl": return `refl ${termToString(term.value)}`;
-    case "recursor": return `${term.inductive}.rec${term.parameters.length === 0 ? "" : ` [${term.parameters.map(termToString).join(", ")}]`} ${term.cases.map(termToString).join(" ")} ${termToString(term.target)}`;
-    case "subst": return `subst ${termToString(term.proof)} ${termToString(term.motive)} ${termToString(term.value)}`;
+    case "refl": return `refl ${termToAtomString(term.value)}`;
+    case "recursor": return `${term.inductive}.rec${term.parameters.length === 0 ? "" : ` [${term.parameters.map(termToString).join(", ")}]`} ${term.cases.map(termToAtomString).join(" ")} ${termToAtomString(term.target)}`;
+    case "subst": return `subst ${termToAtomString(term.proof)} ${termToAtomString(term.motive)} ${termToAtomString(term.value)}`;
   }
 }

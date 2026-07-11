@@ -1,3 +1,5 @@
+import { operatorByName, operatorBySymbol, operatorTable, type OperatorFixity } from "./fixity.js";
+
 export type Expr =
   | { readonly id: string; readonly kind: "var"; readonly name: string }
   | { readonly id: string; readonly kind: "ctor"; readonly name: string; readonly args: readonly Expr[] }
@@ -40,43 +42,73 @@ export function allExpressions(expr: Expr): Expr[] {
   return expr.kind === "var" ? [expr] : [expr, ...expr.args.flatMap(allExpressions)];
 }
 
-export function exprToText(expr: Expr): string {
+/** Precedence of an atom (a variable or a nullary head): binds tighter than everything. */
+const ATOM_PRECEDENCE = 11;
+/** Precedence of prefix application `f x y`: tighter than every infix operator. */
+const APPLICATION_PRECEDENCE = 10;
+
+/** Display spellings for nullary and prefix heads; purely cosmetic. */
+function displayHead(name: string): string {
+  if (name === "nil") return "[]";
+  if (name === "zero") return "0";
+  if (name === "succ") return "S";
+  return name;
+}
+
+/**
+ * Table-driven printing: an operator child is parenthesized exactly when its
+ * precedence is below what its position requires — the operand on an
+ * operator's associative side admits equal precedence, the other side
+ * requires strictly higher. No operator is special-cased.
+ */
+function printExpr(expr: Expr, minimum: number): string {
   if (expr.kind === "var") return expr.name;
-  if (expr.kind === "ctor") {
-    if (expr.name === "nil") return "[]";
-    if (expr.name === "zero") return "0";
-    if (expr.name === "succ" && expr.args.length === 1) return `S (${exprToText(expr.args[0]!)})`;
-    if (expr.name === "cons" && expr.args.length === 2) return `${exprToText(expr.args[0]!)} :: ${exprToText(expr.args[1]!)}`;
-    return expr.args.length === 0 ? expr.name : `${expr.name} ${expr.args.map(exprToText).join(" ")}`;
+  const operator = expr.args.length === 2 ? operatorByName(expr.name) : undefined;
+  if (operator !== undefined) {
+    const { precedence, associativity, symbol, spacing } = operator;
+    const left = printExpr(expr.args[0]!, associativity === "left" ? precedence : precedence + 1);
+    const right = printExpr(expr.args[1]!, associativity === "right" ? precedence : precedence + 1);
+    const text = `${left}${spacing}${symbol}${spacing}${right}`;
+    return precedence < minimum ? `(${text})` : text;
   }
-  if (expr.name === "compose" && expr.args.length === 2) return `(${exprToText(expr.args[0]!)} ∘ ${exprToText(expr.args[1]!)})`;
-  if (expr.name === "apply" && expr.args.length === 2) return `${exprToText(expr.args[0]!)} (${exprToText(expr.args[1]!)})`;
-  if (expr.name === "map" && expr.args.length === 2) {
-    const [fn, value] = expr.args;
-    const text = exprToText(value!);
-    return `map ${exprToText(fn!)} ${value!.kind === "var" || (value!.kind === "ctor" && value!.name === "nil") ? text : `(${text})`}`;
+  if (expr.args.length === 0) return displayHead(expr.name);
+  if (expr.kind === "call" && expr.name === "apply" && expr.args.length === 2) {
+    // Object-level application of a first-class function value. The argument
+    // is always parenthesized because juxtaposition is display-only syntax.
+    const text = `${printExpr(expr.args[0]!, APPLICATION_PRECEDENCE)} (${printExpr(expr.args[1]!, 0)})`;
+    return APPLICATION_PRECEDENCE < minimum ? `(${text})` : text;
   }
-  if ((expr.name === "negb" || expr.name === "rev") && expr.args.length === 1) {
-    const value = expr.args[0]!;
-    const text = exprToText(value);
-    return `${expr.name} ${value.kind === "var" || (value.kind === "ctor" && value.name === "nil") ? text : `(${text})`}`;
-  }
-  if (expr.name === "revAcc" && expr.args.length === 2) {
-    return `revAcc ${exprToText(expr.args[0]!)} ${expr.args[1]!.kind === "call" || expr.args[1]!.kind === "ctor" ? `(${exprToText(expr.args[1]!)})` : exprToText(expr.args[1]!)}`;
-  }
-  if ((expr.name === "add" || expr.name === "append") && expr.args.length === 2) {
-    return `${exprToText(expr.args[0]!)} ${expr.name === "add" ? "+" : "++"} ${exprToText(expr.args[1]!)}`;
-  }
-  return `${expr.name} ${expr.args.map((arg) => arg.kind === "call" ? `(${exprToText(arg)})` : exprToText(arg)).join(" ")}`;
+  const text = `${displayHead(expr.name)} ${expr.args.map((argument) => printExpr(argument, ATOM_PRECEDENCE)).join(" ")}`;
+  return APPLICATION_PRECEDENCE < minimum ? `(${text})` : text;
+}
+
+export function exprToText(expr: Expr): string {
+  return printExpr(expr, 0);
 }
 
 export class ProgramParseError extends Error {}
 
 const CONSTRUCTORS = new Set(["true", "false", "zero", "succ", "nil", "cons"]);
 
-/** Parses the canonical script form: calls use `f(a, b)`; ++, +, :: and ∘ are accepted infix. */
-export function parseProgramExpr(source: string): Expr {
-  const tokens = source.match(/\[\]|\+\+|::|∘|[()+,]|[A-Za-z_][A-Za-z0-9_]*|0/g) ?? [];
+const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function tokenPattern(table: readonly OperatorFixity[]): RegExp {
+  const symbols = table.map((operator) => operator.symbol)
+    .sort((first, second) => second.length - first.length)
+    .map(escapeForRegExp);
+  return new RegExp(["\\[\\]", ...symbols, "[(),]", "[A-Za-z_][A-Za-z0-9_]*", "0"].join("|"), "g");
+}
+
+/**
+ * Parses the canonical script form: calls use `f(a, b)`; the infix operators
+ * declared in the fixity table are accepted with their declared precedence
+ * and associativity via precedence climbing. The algorithm consults ONLY the
+ * table — no operator is special-cased. Chaining operators of equal
+ * precedence but different associativity without parentheses is rejected
+ * (Haskell's rule), never silently associated.
+ */
+export function parseProgramExpr(source: string, table: readonly OperatorFixity[] = operatorTable): Expr {
+  const tokens = source.match(tokenPattern(table)) ?? [];
   let position = 0;
   const peek = (): string | undefined => tokens[position];
   const take = (): string => {
@@ -109,16 +141,22 @@ export function parseProgramExpr(source: string): Expr {
     }
     return CONSTRUCTORS.has(token) ? ctor(token) : programVar(token);
   };
-  const precedence = (token: string | undefined): number => token === "∘" ? 40 : token === "::" ? 30 : token === "+" || token === "++" ? 20 : -1;
-  const infix = (minimum: number): Expr => {
+  const infix = (minimum: number, incoming?: OperatorFixity): Expr => {
     let left = atom();
-    while (precedence(peek()) >= minimum) {
-      const operator = take();
-      const right = infix(precedence(operator) + (operator === "::" ? 0 : 1));
-      left = operator === "::" ? ctor("cons", [left, right])
-        : operator === "++" ? call("append", [left, right])
-          : operator === "+" ? call("add", [left, right])
-            : call("compose", [left, right]);
+    let previous = incoming;
+    while (true) {
+      const token = peek();
+      const operator = token === undefined ? undefined : operatorBySymbol(token, table);
+      if (operator === undefined || operator.precedence < minimum) break;
+      if (previous !== undefined && previous.precedence === operator.precedence && previous.associativity !== operator.associativity) {
+        throw new ProgramParseError(
+          `cannot mix ${previous.symbol} and ${operator.symbol} at the same precedence; add parentheses`,
+        );
+      }
+      take();
+      const right = infix(operator.associativity === "left" ? operator.precedence + 1 : operator.precedence, operator);
+      left = CONSTRUCTORS.has(operator.name) ? ctor(operator.name, [left, right]) : call(operator.name, [left, right]);
+      previous = operator;
     }
     return left;
   };

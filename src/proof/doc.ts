@@ -47,6 +47,21 @@ export const nest = (indent: number, doc: Doc): Doc => ({ kind: "nest", indent, 
 /** Renders `doc` on one line if it fits the remaining width, else breaks it. */
 export const group = (doc: Doc): Doc => ({ kind: "group", doc });
 
+/**
+ * Fill layout (classic Wadler/Leijen `fill`/`sep`): lays `items` out
+ * horizontally separated by spaces, breaking the line only before an item
+ * that would not fit in the remaining width. Unlike wrapping the whole
+ * sequence in one `group` (all-or-nothing), every separator is its own
+ * group, so short items keep packing onto the current line even when a later
+ * long item has to wrap. Inside a flattened outer group each separator
+ * renders as a single space, so flat output is unchanged.
+ */
+export const fill = (items: readonly Doc[]): Doc => {
+  const [first, ...rest] = items;
+  if (first === undefined) return cat();
+  return cat(first, ...rest.map((item) => group(cat(line, item))));
+};
+
 /** Tags every text run inside `doc`; layout is completely unaffected. */
 export const annotate = (tag: string, doc: Doc): Doc => ({ kind: "annotate", tag, doc });
 

@@ -13,7 +13,8 @@ import {
   type Term,
 } from "../kernel/term.js";
 import { allExpressions, expressionEqual, replaceById, type Expr } from "./ast.js";
-import { cat, group, line, nest, render, text, type Doc } from "./doc.js";
+import { applicationSpine } from "../kernel/term.js";
+import { cat, fill, group, line, nest, render, text, type Doc } from "./doc.js";
 import { inductiveByName } from "./inductives.js";
 import { decodeProofSession } from "./protocol.js";
 import { touchProofEnvironment } from "./standardLibrary.js";
@@ -259,39 +260,128 @@ function wrapPis(items: readonly Binder[], body: Term): Term {
   return items.reduceRight((result, binder) => pi(binder.name, binder.type, result), body);
 }
 
+function goalById(session: ProofSession, goalId: string): EquationGoal {
+  const found = session.goals.find((goal) => goal.id === goalId)
+    ?? session.ancestors.find((goal) => goal.id === goalId);
+  if (found === undefined) throw new Error(`unknown proof obligation ${goalId}`);
+  return found;
+}
+
+/** The goal's generalized variables as kernel binders, in generalization order. */
+function generalizedBinders(goal: EquationGoal): Binder[] {
+  const available = binders(goal.context);
+  return goal.generalized.map((name) => {
+    const found = available.find((binder) => binder.name === name);
+    if (found === undefined) throw new Error(`cannot generalize unknown variable ${name}`);
+    return found;
+  });
+}
+
+/** Whether `name` occurs free in the hypothesis (its own binders shadow). */
+function hypothesisMentionsFree(hypothesis: Hypothesis, name: string): boolean {
+  if (hypothesis.binders?.some((binder) => binder.name === name) === true) return false;
+  return [...allExpressions(hypothesis.left), ...allExpressions(hypothesis.right)]
+    .some((expr) => expr.kind === "var" && expr.name === name);
+}
+
+/** The kernel type of a hypothesis with the analyzed variable renamed to the motive value. */
+function hypothesisBinderType(type: Term, hypothesis: Hypothesis, variable?: string): Term {
+  const left = variable === undefined ? hypothesis.left : replaceProgramVariable(hypothesis.left, variable);
+  const right = variable === undefined ? hypothesis.right : replaceProgramVariable(hypothesis.right, variable);
+  const proposition = equal(type, expressionTerm(left), expressionTerm(right));
+  return (hypothesis.binders ?? []).reduceRight(
+    (result, binder) => pi(binder.name, valueType(binder.type), result),
+    proposition,
+  );
+}
+
+/**
+ * Proof term for a goal-tree node. A leaf is the classic transition chain
+ * ending in reflexivity. A split goal composes recursively: its pre-split
+ * chains are stitched (via eq_trans) around a recursor whose motive abstracts
+ * the analyzed variable out of the split-time equation — and, destruct-style,
+ * out of every hypothesis that freely mentions it: those hypotheses are
+ * reverted into the motive as Π-binders and the recursor's result is applied
+ * back to their proofs, so each branch receives the INSTANTIATED hypothesis
+ * (matching what the session shows). Branch terms bind the freshened
+ * constructor fields, an induction hypothesis for every recursive field
+ * (unused for mere case analyses), the generalized binders, and the reverted
+ * hypotheses — each branch body being this function on the child obligation.
+ */
+function goalTreeProof(session: ProofSession, goal: EquationGoal, environment: Environment): Term {
+  if (goal.analysis === undefined) return goalProof(goal, environment);
+  const analysis = goal.analysis;
+  const inductive = inductiveByName(analysis.type);
+  if (inductive === undefined || analysis.branches.length !== inductive.constructors.length) {
+    throw new Error("invalid analysis branches");
+  }
+  const type = valueType(goal.type);
+  const generalized = generalizedBinders(goal);
+  const reverted = goal.hypotheses.filter((hypothesis) => hypothesisMentionsFree(hypothesis, analysis.variable));
+  const revertedBinders = reverted.map((hypothesis): Binder => ({
+    name: hypothesis.name,
+    type: hypothesisBinderType(type, hypothesis, analysis.variable),
+  }));
+  const motiveBody = equal(
+    type,
+    expressionTerm(replaceProgramVariable(goal.left, analysis.variable)),
+    expressionTerm(replaceProgramVariable(goal.right, analysis.variable)),
+  );
+  const typedMotive = lambda(
+    "__motive_value",
+    constant(analysis.type),
+    wrapPis([...generalized, ...revertedBinders], motiveBody),
+  );
+  const branchTerms = analysis.branches.map((branch) => {
+    const child = goalById(session, branch.goalId);
+    const fields = branch.fields.map((field) => ({ name: field.name, type: valueType(field.type) }));
+    // The kernel recursor always binds an induction hypothesis for every
+    // recursive field; for a case analysis the binder is simply unused.
+    const inductionHypotheses = branch.fields.filter((field) => field.recursive === true).map((field) => ({
+      name: (analysis.kind === "induction"
+        ? child.hypotheses.find((hypothesis) => hypothesis.id === `ih-${field.name}`)?.name
+        : undefined) ?? `__unused_ih_${field.name}`,
+      type: app(typedMotive, variable(field.name)),
+    }));
+    // The instantiated hypotheses, exactly as the child goal carries them.
+    const branchReverted = reverted.map((hypothesis): Binder => {
+      const instantiated = child.hypotheses.find((candidate) => candidate.id === hypothesis.id);
+      if (instantiated === undefined) throw new Error(`missing instantiated hypothesis ${hypothesis.name}`);
+      return { name: instantiated.name, type: hypothesisBinderType(type, instantiated) };
+    });
+    return wrapLambdas(
+      [...fields, ...inductionHypotheses, ...generalized, ...branchReverted],
+      goalTreeProof(session, child, environment),
+    );
+  });
+  const recursorProof = apps(
+    recursor(analysis.type, typedMotive, branchTerms, variable(analysis.variable)),
+    ...generalized.map((binder) => variable(binder.name)),
+    ...reverted.map((hypothesis) => hypothesisProof(hypothesis)),
+  );
+  const left = chain(goal, "left", environment);
+  const right = chain(goal, "right", environment);
+  const proof = trans(
+    type,
+    left.first,
+    left.last,
+    right.first,
+    left.proof,
+    trans(type, left.last, right.last, right.first, recursorProof, symm(type, right.first, right.last, right.proof)),
+  );
+  check(proof, equal(type, left.first, right.first), localContext(goal), environment);
+  return proof;
+}
+
 function theoremCertificate(session: ProofSession, environment: Environment): { readonly type: Term; readonly term: Term } {
   const theoremBinders = binders(session.theoremContext);
-  const resultType = valueType(session.goals[0]!.type);
+  const root = goalById(session, "goal-root");
+  const resultType = valueType(root.type);
   const statement = equal(resultType, expressionTerm(session.theoremLeft), expressionTerm(session.theoremRight));
-  if (session.analysis === undefined) {
-    return { type: wrapPis(theoremBinders, statement), term: wrapLambdas(theoremBinders, goalProof(session.goals[0]!, environment)) };
-  }
-  const inductive = inductiveByName(session.analysis.type);
-  if (inductive === undefined || session.goals.length !== inductive.constructors.length) throw new Error("invalid induction branches");
-  const analyzedType = constant(session.analysis.type);
-  const generalizedBinders = theoremBinders.filter((binder) => session.generalizedVariables.includes(binder.name));
-  const motiveBody = equal(
-    resultType,
-    expressionTerm(replaceProgramVariable(session.theoremLeft, session.analysis.variable)),
-    expressionTerm(replaceProgramVariable(session.theoremRight, session.analysis.variable)),
-  );
-  const typedMotive = lambda("__motive_value", analyzedType, wrapPis(generalizedBinders, motiveBody));
-  const branches = session.goals.map((goal, index) => {
-    const constructor = inductive.constructors[index]!;
-    const fields = constructor.fields.map((field) => ({ name: field.name, type: valueType(field.type) }));
-    const inductionHypotheses = session.analysis?.kind === "induction"
-      ? constructor.fields.filter((field) => field.recursive === true).map((field) => ({
-          name: goal.hypotheses.find((hypothesis) => hypothesis.id === `ih-${field.name}`)?.name ?? `ih_${field.name}`,
-          type: app(typedMotive, variable(field.name)),
-        }))
-      : [];
-    return wrapLambdas([...fields, ...inductionHypotheses, ...generalizedBinders], goalProof(goal, environment));
-  });
-  const body = apps(
-    recursor(session.analysis.type, typedMotive, branches, variable(session.analysis.variable)),
-    ...generalizedBinders.map((binder) => variable(binder.name)),
-  );
-  return { type: wrapPis(theoremBinders, statement), term: wrapLambdas(theoremBinders, body) };
+  return {
+    type: wrapPis(theoremBinders, statement),
+    term: wrapLambdas(theoremBinders, goalTreeProof(session, root, environment)),
+  };
 }
 
 function replaceProgramVariable(expr: Expr, name: string): Expr {
@@ -308,10 +398,16 @@ export interface KernelCertificate {
 }
 
 /** Kernel terms as pretty-printer documents: flat output is byte-identical to
- * termToString, but each compound node is a group, so at a finite width the
- * nested applications indent tree-style instead of one enormous line. */
+ * termToString, but each compound node is a group, so at a finite width a
+ * too-long term breaks Haskell-style. Applications are flattened curried
+ * spines (`map f (append nil ys)`) with only compound arguments
+ * parenthesized; a too-wide spine lays out with FILL semantics — as many
+ * arguments per line as fit the width budget, continuation lines nested two
+ * spaces under the head — so short arguments stay attached to the head even
+ * when a long compound argument wraps. */
 function termToDoc(term: Term): Doc {
   const broken = (...items: readonly Doc[]): Doc => group(cat(...items));
+  const spine = (items: readonly Doc[]): Doc => group(nest(2, fill(items)));
   switch (term.kind) {
     case "type": return text(`Type ${term.level}`);
     case "var": return text(term.name);
@@ -319,16 +415,42 @@ function termToDoc(term: Term): Doc {
     case "pi": return broken(text(`(Π ${term.param} : `), termToDoc(term.domain), text(","), nest(2, cat(line, termToDoc(term.codomain))), text(")"));
     case "lam": return broken(text(`(λ ${term.param} : `), termToDoc(term.paramType), text(","), nest(2, cat(line, termToDoc(term.body))), text(")"));
     case "let": return broken(text(`(let ${term.name} : `), termToDoc(term.valueType), text(" :="), nest(2, cat(line, termToDoc(term.value))), text(";"), nest(2, cat(line, termToDoc(term.body))), text(")"));
-    case "app": return broken(text("("), termToDoc(term.fn), nest(2, cat(line, termToDoc(term.arg))), text(")"));
+    case "app": {
+      const { head, args } = applicationSpine(term);
+      return spine([termToAtomDoc(head), ...args.map(termToAtomDoc)]);
+    }
     case "eq": return broken(text("("), termToDoc(term.left), text(" ="), nest(2, cat(line, termToDoc(term.right))), text(")"));
-    case "refl": return broken(text("refl"), nest(2, cat(line, termToDoc(term.value))));
-    case "recursor": return broken(
-      text(`${term.inductive}.rec`),
-      ...(term.parameters.length === 0 ? [] : [text(" ["), ...term.parameters.flatMap((parameter, index) => index === 0 ? [termToDoc(parameter)] : [text(", "), termToDoc(parameter)]), text("]")]),
-      ...term.cases.map((branch) => nest(2, cat(line, termToDoc(branch)))),
-      nest(2, cat(line, termToDoc(term.target))),
-    );
-    case "subst": return broken(text("subst"), nest(2, cat(line, termToDoc(term.proof))), nest(2, cat(line, termToDoc(term.motive))), nest(2, cat(line, termToDoc(term.value))));
+    case "refl": return spine([text("refl"), termToAtomDoc(term.value)]);
+    case "recursor": {
+      const head = term.parameters.length === 0
+        ? text(`${term.inductive}.rec`)
+        : cat(
+            text(`${term.inductive}.rec [`),
+            ...term.parameters.flatMap((parameter, index) => index === 0 ? [termToDoc(parameter)] : [text(", "), termToDoc(parameter)]),
+            text("]"),
+          );
+      return spine([head, ...term.cases.map(termToAtomDoc), termToAtomDoc(term.target)]);
+    }
+    case "subst": return spine([text("subst"), termToAtomDoc(term.proof), termToAtomDoc(term.motive), termToAtomDoc(term.value)]);
+  }
+}
+
+/** Parenthesizes a spine-position Doc unless the term is an atom or prints its own delimiters. */
+function termToAtomDoc(term: Term): Doc {
+  switch (term.kind) {
+    case "var":
+    case "const":
+    case "pi":
+    case "lam":
+    case "let":
+    case "eq":
+      return termToDoc(term);
+    case "type":
+    case "app":
+    case "refl":
+    case "recursor":
+    case "subst":
+      return group(cat(text("("), termToDoc(term), text(")")));
   }
 }
 
@@ -342,7 +464,7 @@ export function checkProofSession(value: unknown): KernelCertificate {
   const session = decodeProofSession(value);
   const environment = touchProofEnvironment();
   assertAxiomFree(environment);
-  for (const goal of session.goals) validateOpenGoal(goal, environment);
+  for (const goal of [...session.ancestors, ...session.goals]) validateOpenGoal(goal, environment);
   if (session.goals.some((goal) => goal.status !== "solved")) {
     return { environment, script: session.goals.map((goal) => prettyTerm(equalityType(goal, goal.left, goal.right))).join("\n") };
   }

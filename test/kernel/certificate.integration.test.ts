@@ -7,8 +7,12 @@ function finish(lessonId: string): ProofSession {
   if (lessonId === "list-rev-acc") session = applyProofMove(session, "generalize:acc");
   for (let count = 0; count < 100 && session.goals.some((goal) => goal.status === "open"); count += 1) {
     const moves = enumerateProofMoves(session);
-    const move = moves.find((candidate) => candidate.kind === "induction")
-      ?? moves.find((candidate) => candidate.kind === "cases")
+    // Analyses are state-derived and available in every goal now; this driver
+    // only takes them on the root goal, as the curriculum walkthroughs do.
+    const analysis = session.focusedGoalId === "goal-root"
+      ? moves.find((candidate) => candidate.kind === "induction") ?? moves.find((candidate) => candidate.kind === "cases")
+      : undefined;
+    const move = analysis
       ?? moves.find((candidate) => candidate.kind === "reduce")
       ?? moves.find((candidate) => candidate.kind === "rewrite")
       ?? moves.find((candidate) => candidate.kind === "close");
