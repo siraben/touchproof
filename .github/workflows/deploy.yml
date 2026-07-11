@@ -1,0 +1,48 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Check, build, and deploy to Cloudflare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Build core library
+        run: corepack pnpm build
+
+      - name: Typecheck, lint, and test
+        run: |
+          corepack pnpm typecheck
+          corepack pnpm lint
+          corepack pnpm test
+          corepack pnpm --dir apps/web typecheck
+          corepack pnpm --dir apps/web test
+
+      - name: Build static export
+        run: corepack pnpm build:cloudflare
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 5d233c9f0ea19e1546225243dbee83e0
+          command: deploy
