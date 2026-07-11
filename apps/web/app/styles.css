@@ -229,8 +229,8 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
    (ends x 332), the left context card (ends x 272), and the right definition
    column (starts x 1011), so it never shares a lane with the floating cards.
    The max-height + scroll is a fallback for unusually long move lists. */
-.move-palette { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4; display: flex; flex-flow: row wrap; justify-content: center; gap: 7px; width: 520px; max-height: 244px; overflow-y: auto; margin: 0; text-align: left; }
-.move-palette button { display: flex; gap: 11px; align-items: flex-start; width: 250px; padding: 12px; border: 1px solid var(--vellum-edge); border-radius: 12px; background: var(--grain), linear-gradient(180deg, rgba(251, 247, 234, .97), rgba(239, 230, 207, .97)); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-card); transition: transform .16s, border-color .16s, box-shadow .16s; }
+.move-palette { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4; display: grid; grid-template-columns: repeat(2, 250px); justify-content: center; align-items: stretch; gap: 7px; width: 520px; max-height: 244px; overflow-y: auto; margin: 0; text-align: left; }
+.move-palette button { display: flex; gap: 11px; align-items: flex-start; padding: 12px; border: 1px solid var(--vellum-edge); border-radius: 12px; background: var(--grain), linear-gradient(180deg, rgba(251, 247, 234, .97), rgba(239, 230, 207, .97)); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-card); transition: transform .16s, border-color .16s, box-shadow .16s; }
 .move-palette button:hover { border-color: var(--cyan-strong); transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 1px 2px rgba(4, 10, 18, .5), 0 16px 32px rgba(4, 10, 18, .5); }
 .move-palette button > span { color: var(--cyan-ink); font-size: 20px; }
 .move-palette strong, .move-palette small { display: block; }
@@ -344,14 +344,10 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
 /* --- Lesson completion -------------------------------------------------------------------------
    The palette is empty once every obligation closes; the next-lesson chip
    takes its place and carries the flow forward. */
-.move-palette .next-lesson { width: 330px; align-items: center; border-color: var(--cyan-strong); box-shadow: var(--shadow-card), 0 0 0 1px rgba(56, 189, 248, .35), 0 0 26px rgba(56, 189, 248, .28); }
+.move-palette .next-lesson { grid-column: 1 / -1; justify-self: center; width: 330px; align-items: center; border-color: var(--cyan-strong); box-shadow: var(--shadow-card), 0 0 0 1px rgba(56, 189, 248, .35), 0 0 26px rgba(56, 189, 248, .28); }
 .move-palette .next-lesson > span { color: var(--cyan-ink); font-size: 22px; }
 .move-palette .next-lesson strong { font-size: 15px; }
 
-/* --- Suggested move ------------------------------------------------------------------------------
-   The first chip and the "Suggested move" panel read as one unit. */
-.move-palette button.suggested { position: relative; border-color: rgba(56, 189, 248, .55); }
-.move-palette button.suggested::after { content: "Suggested"; position: absolute; top: -7px; right: 10px; padding: 1px 7px; border: 1px solid rgba(56, 189, 248, .55); border-radius: 999px; background: var(--vellum-hi); color: var(--cyan-ink); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 
 /* --- Context menu flipped above its anchor -------------------------------------------------------- */
 .context-menu.flipped::before { top: auto; bottom: -7px; transform: rotate(225deg); }
@@ -414,6 +410,6 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
   /* The bottom-center band is occupied by the fixed view-switch on mobile and
      the 720px canvas cannot clear canvas-help, so keep the palette as the
      original right-anchored single column here. */
-  .move-palette { left: auto; right: 20px; transform: none; flex-flow: column nowrap; width: 250px; }
+  .move-palette { left: auto; right: 20px; transform: none; grid-template-columns: 1fr; width: 250px; }
   .move-palette .next-lesson { width: 250px; }
 }

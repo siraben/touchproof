@@ -739,7 +739,7 @@ export function ProofWorkspace() {
                       ? `Drag ${analysisMove.variable} into the analysis tray`
                       : "Touch a dotted expression to apply its defining equation"}
               </div>
-              {!solved && <div className="canvas-help"><strong>Suggested move</strong><span>{state.moves[0]?.explanation ?? "Every local obligation is complete."}</span></div>}
+              {!solved && <div className="canvas-help"><strong>Why this move?</strong><span>{state.moves[0]?.explanation ?? "Every local obligation is complete."}</span></div>}
               <div className="move-palette">
                 {solved && nextLesson !== undefined && (
                   <button className="next-lesson" disabled={busy} onClick={() => void startLesson(nextLesson.id)}>
@@ -747,10 +747,9 @@ export function ProofWorkspace() {
                     <div><strong>Next lesson</strong><small>{nextLesson.title}</small></div>
                   </button>
                 )}
-                {state.moves.map((move, index) => (
+                {state.moves.map((move) => (
                   <button
                     key={move.id}
-                    className={index === 0 ? "suggested" : ""}
                     disabled={busy}
                     onClick={() => void send({ kind: "apply-move", moveId: move.id })}
                     {...previewProps(move)}
