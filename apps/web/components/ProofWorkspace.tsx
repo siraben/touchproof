@@ -87,6 +87,28 @@ export function ProofWorkspace() {
     if (state !== undefined) window.localStorage.setItem("touchproof:current:v5", JSON.stringify(state.session));
   }, [state]);
 
+  // Mobile: after a move the palette sits far below the equation in the stacked
+  // column, so a move applied from deep in the scroll would leave the (updated)
+  // equation off-screen. Gently bring the hero equation card back into view on
+  // every state change at ≤800px. No-op on desktop (the board doesn't scroll the
+  // equation away) and honours prefers-reduced-motion by snapping instead.
+  useEffect(() => {
+    if (state === undefined || view !== "visual") return;
+    if (!window.matchMedia("(max-width: 800px)").matches) return;
+    // Target the case label (the "Current obligation ·" line directly above the
+    // hero equation) when present, so the scroll lands with a hair of context
+    // above the equation rather than clipping it flush to the top; fall back to
+    // the equation card. `block: "start"` is predictable even when the equation
+    // is taller than the viewport (a wrapped scope box). The layout effect runs
+    // after the DOM commit, so the committed geometry is already valid here.
+    const target =
+      document.querySelector(".proof-stage .visual-view > .case-label") ??
+      document.querySelector(".proof-stage .equation-card");
+    if (target === null) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }, [state, view]);
+
   useEffect(() => () => window.clearTimeout(resetTimer.current), []);
 
   const startLesson = async (lessonId: string) => {

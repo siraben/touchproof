@@ -121,7 +121,9 @@ export function ProofCanvas({
             }}
           >
             <strong>{analysisMove.kind === "cases" ? "Analyze this value" : "Use induction"}</strong>
-            <span>Drag <code>{analysisMove.variable}</code> here—or click it and choose the action.</span>
+            {/* Drag is pointer-only; on touch (CSS ≤800px) swap to the tap route. */}
+            <span className="hint-drag">Drag <code>{analysisMove.variable}</code> here—or click it and choose the action.</span>
+            <span className="hint-tap">Tap <code>{analysisMove.variable}</code> and choose the action.</span>
           </div>
         )}
       </CanvasCard>
@@ -181,13 +183,24 @@ export function ProofCanvas({
       )}
       <div className="gesture-hint">
         <span className="cursor-icon">{solved ? "✓" : "↖"}</span>
-        {solved
-          ? "Proved and kernel-checked. Read it back in the Notebook, or continue."
-          : moves.some((move) => move.kind === "rewrite")
-            ? "Drag IH onto the matching recursive call"
-            : analysisMove !== undefined
-              ? `Drag ${analysisMove.variable} into the analysis tray`
-              : "Touch a dotted expression to apply its defining equation"}
+        {solved ? (
+          "Proved and kernel-checked. Read it back in the Notebook, or continue."
+        ) : moves.some((move) => move.kind === "rewrite") ? (
+          /* Drag is pointer-only; the tap route (tap the IH card -> menu) covers
+             the same move on touch, so show a tap-worded hint on mobile where
+             the CSS ≤800px hides .hint-drag and reveals .hint-tap. */
+          <>
+            <span className="hint-drag">Drag IH onto the matching recursive call</span>
+            <span className="hint-tap">Tap IH, then tap the matching recursive call</span>
+          </>
+        ) : analysisMove !== undefined ? (
+          <>
+            <span className="hint-drag">Drag {analysisMove.variable} into the analysis tray</span>
+            <span className="hint-tap">Tap {analysisMove.variable}, then choose the action</span>
+          </>
+        ) : (
+          "Touch a dotted expression to apply its defining equation"
+        )}
       </div>
       {!solved && <div className="canvas-help"><strong>Why this move?</strong><span>{moves[0]?.explanation ?? "Every local obligation is complete."}</span></div>}
       <MovePalette

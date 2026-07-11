@@ -107,6 +107,7 @@
 /* --fs-base is the documented default body rung; set it on <body> so controls
    that inherit (view switch, obligation tabs) sit on the scale instead of the
    browser's 16px. Elements that want a larger rung pin it explicitly. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { margin: 0; color: var(--text); background: var(--board-deep); font-family: var(--sans); font-size: var(--fs-base); }
 button { font: inherit; }
 :focus-visible { outline: 2px solid var(--cyan-strong); outline-offset: 2px; }
@@ -297,6 +298,10 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .function-name { font-style: normal; color: var(--ink-fn); }
 .argument { margin-left: .24em; }
 .gesture-hint { display: inline-flex; gap: 10px; align-items: center; color: var(--muted); font-size: var(--fs-base); }
+/* Drag-worded vs tap-worded instruction variants (gesture hint + analysis tray).
+   The pointer board shows the drag copy; the ≤800px stacked flow (no HTML5 drag
+   on touch) swaps to the tap copy. Default shows drag; the media query flips it. */
+.hint-tap { display: none; }
 .cursor-icon { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-input); background: rgba(125, 211, 252, .14); border: 1px solid var(--hairline); color: var(--cyan); }
 
 /* --- Context menu (vellum popover) --------------------------------------------- */
@@ -609,17 +614,32 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   /* backdrop-filter would make the topbar the containing block for fixed
      descendants, trapping the bottom view-switch inside the header. */
   .topbar { grid-template-columns: auto 1fr; gap: 10px; padding: 0 14px; backdrop-filter: none; }
-  .view-switch { order: 3; position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 30; background: var(--board-raised); box-shadow: var(--shadow); }
+  /* The fixed bottom view-switch rides above the home-indicator / notch: its
+     resting gap is 12px plus whatever the device reserves (0 on non-notched). */
+  .view-switch { order: 3; position: fixed; bottom: calc(12px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 30; background: var(--board-raised); box-shadow: var(--shadow); }
+  /* ≥40px tap targets for the three view tabs (were 30px tall). */
+  .view-switch button { padding: 10px 18px; }
   .brand small { display: none; }
   /* Kernel lamp keeps its glow but sheds its label to save room. */
   .kernel-badge { font-size: 0; gap: 0; }
   .header-actions { gap: 4px; }
-  /* Real small labeled buttons, wrapped in --fs-2xs, instead of unlabeled dots. */
+  /* Real small labeled buttons, wrapped in --fs-2xs, instead of unlabeled dots.
+     The chrome stays compact (a 390px topbar holds brand + 5 controls + lamp),
+     but a full-height invisible pseudo-element overhangs each control so the
+     effective touch target clears ~40px without visual bloat. */
   .header-actions > button:not(.history-button) {
-    font-size: var(--fs-2xs); width: auto; height: auto; padding: 5px 7px; border-radius: var(--radius-input);
+    position: relative;
+    font-size: var(--fs-2xs); width: auto; height: auto; padding: 7px 9px; border-radius: var(--radius-input);
     border: 1px solid var(--hairline); background: rgba(125, 211, 252, .06); color: var(--text);
   }
   .header-actions > button:not(.history-button):disabled { opacity: .35; }
+  /* Vertical hit extension: pseudo-element grows the touchable box past the
+     visible chrome (top/bottom overhang) so short controls still catch a thumb. */
+  .header-actions > button::after {
+    content: ""; position: absolute; left: 0; right: 0; top: -8px; bottom: -8px;
+  }
+  /* Undo/redo were 27px squares; widen the hit box and add the same overhang. */
+  .header-actions > .history-button { position: relative; width: 34px; height: 30px; }
 
   /* --- Title strip: one compact row — the canvas owns the screen ------------ */
   .topbar { height: 52px; padding: 0 12px; }
@@ -642,21 +662,32 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
     border-right: 0; border-bottom: 1px solid var(--hairline);
     max-height: none; padding: 10px 14px;
     overflow-x: auto; overflow-y: hidden;
+    /* Horizontal lesson strip inside a vertically-scrolling page: keep a
+       sideways pan contained to the strip (no scroll chaining into the page),
+       and let the browser own vertical panning so the gesture doesn't fight the
+       stage scroll. touch-action:pan-x also suppresses the horizontal-scroll
+       rubber-band bounce from bleeding into page navigation. */
+    overscroll-behavior-x: contain; touch-action: pan-x;
   }
   .context-panel h2 { margin: 0 0 8px; }
   .lesson-list { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: max-content; gap: 8px; margin: 0; }
-  .lesson-list button { flex-direction: row; gap: 8px; padding: 7px 11px; border: 1px solid var(--hairline); border-radius: var(--radius-pill); white-space: nowrap; }
+  .lesson-list button { flex-direction: row; align-items: center; gap: 8px; padding: 7px 11px; border: 1px solid var(--hairline); border-radius: var(--radius-pill); white-space: nowrap; overflow: hidden; }
+  .lesson-list button > span { flex: 0 0 25px; }
   /* Compact chip: number badge + short title only; concept subtitle is dropped
      to keep the strip a single low row. */
   .lesson-list button small { display: none; }
-  .lesson-list button strong { white-space: nowrap; }
+  .lesson-list button strong { white-space: nowrap; max-width: 52vw; overflow: hidden; text-overflow: ellipsis; }
   .lesson-source { display: none; }
   /* Themed horizontal scrollbar on the path strip. */
   .context-panel { scrollbar-width: thin; scrollbar-color: rgba(125, 211, 252, .25) transparent; }
 
   /* --- The stage becomes normal document flow ----------------------------- */
-  .proof-stage { padding: 16px 14px 92px; container-type: normal; }
+  /* Bottom reserve clears the fixed view-switch (its box + the 12px gap + the
+     device safe-area inset) so the last chip is never trapped behind it. */
+  .proof-stage { padding: 16px 14px calc(96px + env(safe-area-inset-bottom)); container-type: normal; }
   .obligation-tabs { flex-wrap: wrap; margin-bottom: 16px; }
+  /* ≥40px obligation tabs (were 37px tall). */
+  .obligation-tabs button { padding: 9px 15px 9px 10px; }
 
   /* .visual-view sheds every drafting-board knob: no reserved rails, no bottom
      palette band, no min-width forcing horizontal scroll. Cards flow. */
@@ -683,10 +714,20 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   .visual-view > .scope-box { max-width: none; width: 100%; margin: 0 0 14px; }
   .visual-view > .case-label { margin: 0 0 8px; text-align: left; }
   .visual-view > .gesture-hint { margin: 0 0 16px; }
+  /* No HTML5 drag on touch: swap every drag-worded instruction (gesture hint and
+     the analysis-tray note) for its tap-worded counterpart. */
+  .hint-drag { display: none; }
+  .hint-tap { display: inline; }
 
   .equation-card { min-height: 0; padding: 24px 16px; gap: 12px; }
   /* Scope boxes annotate in flow, full width. */
   .scope-box .equation-card { margin: 0; }
+  /* Touch sizing for in-equation affordances. The = closer and every tappable
+     term need a ≥40px thumb target; on desktop these lean on hover, but a phone
+     taps directly, so grow the line-height and pad the = without visual bloat. */
+  .equation-card { line-height: 1.9; }
+  .equals { padding: 9px 12px; }
+  .expression.tappable, .expression.movable { padding: 4px 2px; }
 
   /* --- Canvas cards: absolute -> static, full-width accordions ------------- */
   .canvas-card {
@@ -695,6 +736,11 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
        ignores them, but reset any leaked top from --card-index too). */
     top: auto; left: auto; right: auto;
   }
+  /* The card is static in the stacked flow, so its header is never dragged here.
+     The desktop drag handle sets touch-action:none, which would swallow the
+     vertical scroll gesture whenever a thumb lands on a card header (e.g. tapping
+     a definition-card title to expand it). Hand touch back to the page. */
+  .canvas-card-handle { touch-action: auto; cursor: pointer; }
   /* Definition/inductive cards: full-width, and the chevron accordion is live
      (the @container block already reveals .definition-card-toggle and hides
      .is-collapsed bodies; container-type:normal disables that block, so drive
@@ -702,6 +748,11 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   .definition-canvas-card { width: 100%; }
   .definition-canvas-card .definition-card-toggle { display: inline-block; }
   .definition-canvas-card.is-collapsed .canvas-card-body { display: none; }
+  /* The chevron was a 10x12px glyph — far too small to tap. Grow its touch box
+     to the full header height with padding and an overhanging pseudo-element so
+     the whole right end of the header row toggles the accordion. */
+  .definition-card-toggle { position: relative; padding: 8px 10px; margin: -8px -8px -8px 0; font-size: var(--fs-md); }
+  .definition-card-toggle::after { content: ""; position: absolute; inset: -4px -2px; }
   /* Belt-and-braces: if a code line still overruns, let it scroll rather than
      force the whole page wide. */
   .canvas-card-body code, .canvas-card-body pre { overflow-x: auto; }
@@ -713,7 +764,24 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
     overflow: visible;
   }
   .move-palette .next-lesson { width: 100%; grid-column: 1; justify-self: stretch; }
+  /* Full-width chips have vertical room, and phones have no hover — so the
+     explanation that lives in the hover/focus-only .move-tip tooltip would be
+     unreachable (a tap fires the move). Reflow the tooltip into a visible second
+     line inside each chip instead: the label and the "why" both read at once. */
+  .move-palette .move-chip {
+    display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: start;
+    padding: 11px 14px; min-height: 44px; text-align: left;
+  }
+  .move-palette .move-chip > span:first-child { grid-row: 1 / span 2; align-self: center; }
   .move-palette .move-chip strong { white-space: normal; }
+  .move-palette .move-chip .move-tip {
+    position: static; grid-column: 2; width: auto; max-width: none; transform: none;
+    margin: 3px 0 0; padding: 0; border: 0; background: none; box-shadow: none;
+    opacity: 1; visibility: visible; pointer-events: none;
+    color: var(--ink-muted); font-size: var(--fs-2xs); line-height: 1.35;
+  }
+  /* The tooltip arrow is meaningless once the tip is inline. */
+  .move-palette .move-chip .move-tip::after { display: none; }
 
   /* --- Kill the lesson-load stagger on mobile ------------------------------
      The staggered rise-in leaves delayed children holding their `both`-fill
@@ -728,4 +796,14 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   .visual-view > .gesture-hint,
   .visual-view > .canvas-help,
   .visual-view > .move-palette { animation: none; opacity: 1; translate: none; }
+
+  /* --- Toasts clear the fixed view-switch ---------------------------------
+     Both toasts anchor bottom-right at 24px; the fixed view-switch sits at the
+     bottom-center (its box + a 12px gap + the safe-area inset). At 390px the two
+     collide, hiding half the message. Lift the toasts to rest just above the
+     switch and inset from the edges so they stay fully on-screen. */
+  .error-toast, .checking-toast {
+    right: 14px; left: 14px;
+    bottom: calc(64px + env(safe-area-inset-bottom));
+  }
 }

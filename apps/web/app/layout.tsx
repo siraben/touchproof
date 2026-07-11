@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Spline_Sans_Mono, STIX_Two_Text } from "next/font/google";
 import "./styles.css";
 
@@ -12,6 +12,16 @@ const mono = Spline_Sans_Mono({ subsets: ["latin"], variable: "--font-mono" });
 export const metadata: Metadata = {
   title: "TouchProof",
   description: "Learn functional programming and theorem proving by touching the proof.",
+};
+
+// viewport-fit=cover lets the layout reach under a notched phone's rounded
+// corners / home indicator, which is what makes env(safe-area-inset-*) resolve
+// to real values — the fixed bottom view-switch, the stage's bottom reserve and
+// the mobile toasts all pad by those insets (see styles.css @media ≤800px).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
