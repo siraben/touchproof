@@ -66,10 +66,10 @@ describe("proposition hero card", () => {
       onMove: () => undefined,
     }));
     const text = markup.replace(/<[^>]+>/g, "");
-    expect(text).toBe("P \u2227\u00A0Q \u2192\u00A0P\u2713");
+    expect(text).toBe("P \u2227\u00A0Q \u2192\u00A0P");
     expect(text).not.toContain("=");
     expect(markup).toContain("proposition-card");
-    // No exact move yet, so the seal must not pulse.
-    expect(markup).not.toContain("closable");
+    // The check is pure affordance: with no exact move it does not render at all.
+    expect(markup).not.toContain("\u2713");
   });
 });
