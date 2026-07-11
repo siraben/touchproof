@@ -7,7 +7,7 @@ export function CanvasCard({
   initial,
   anchor = "left",
   className = "",
-  stackIndex,
+  stacked = false,
   children,
 }: {
   title: React.ReactNode;
@@ -16,25 +16,30 @@ export function CanvasCard({
   initial: { x: number; y: number };
   anchor?: "left" | "right";
   className?: string;
-  // When set, an undragged right-anchored card takes its vertical position from
-  // CSS (top derives from --card-index) so the right-rail row gap can respond to
-  // the container query. Once dragged, the JS-measured left/top wins as usual.
-  stackIndex?: number;
+  // Stacked cards live in-flow inside the right rail (position: static). Instead
+  // of converting to absolute left/top on drag, they keep their flow slot and
+  // apply the drag as a CSS `translate`, so a sideways drag keeps its horizontal
+  // offset while the card still flows vertically with the column. Left-anchored
+  // cards (the Local context sheet) stay absolute as before.
+  stacked?: boolean;
   children: React.ReactNode;
 }) {
-  // A right-anchored card floats against the right edge until the user first
-  // drags it. On drag start we measure its box against the offsetParent and
-  // convert to absolute left/top so it never overlaps the centered equation.
+  // A non-stacked right-anchored card floats against the right edge until the
+  // user first drags it. On drag start we measure its box against the
+  // offsetParent and convert to absolute left/top so it never overlaps the
+  // centered equation. A stacked card instead tracks a translate offset.
   const [position, setPosition] = useState<{ x: number; y: number } | undefined>(
-    anchor === "left" ? initial : undefined,
+    anchor === "left" && !stacked ? initial : undefined,
   );
+  const [offset, setOffset] = useState<{ dx: number; dy: number } | undefined>(undefined);
   const cardRef = useRef<HTMLElement>(null);
   const drag = useRef<{ pointerId: number; dx: number; dy: number } | undefined>(undefined);
-  const style: React.CSSProperties =
-    position === undefined
-      ? stackIndex === undefined
-        ? { right: initial.x, top: initial.y }
-        : { right: initial.x, ["--card-index" as string]: stackIndex }
+  const style: React.CSSProperties = stacked
+    ? offset === undefined
+      ? {}
+      : { translate: `${offset.dx}px ${offset.dy}px` }
+    : position === undefined
+      ? { right: initial.x, top: initial.y }
       : { left: position.x, top: position.y };
   return (
     <section ref={cardRef} className={`canvas-card ${className}`} style={style} onClick={(event) => event.stopPropagation()}>
@@ -42,6 +47,13 @@ export function CanvasCard({
         className="canvas-card-handle"
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
+          if (stacked) {
+            // Anchor the drag at the current translate offset so a card already
+            // nudged sideways continues smoothly from where it sits.
+            const base = offset ?? { dx: 0, dy: 0 };
+            drag.current = { pointerId: event.pointerId, dx: event.clientX - base.dx, dy: event.clientY - base.dy };
+            return;
+          }
           // Resolve the current on-screen position so a right-anchored card
           // keeps its exact spot at the moment the drag begins.
           let current = position;
@@ -60,6 +72,12 @@ export function CanvasCard({
         }}
         onPointerMove={(event) => {
           if (drag.current?.pointerId !== event.pointerId) return;
+          if (stacked) {
+            // Free translate offset from the flow slot; the card keeps flowing
+            // vertically with the column and just carries this delta.
+            setOffset({ dx: event.clientX - drag.current.dx, dy: event.clientY - drag.current.dy });
+            return;
+          }
           setPosition({ x: Math.max(8, event.clientX - drag.current.dx), y: Math.max(8, event.clientY - drag.current.dy) });
         }}
         onPointerUp={(event) => {

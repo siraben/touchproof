@@ -158,40 +158,42 @@ export function ProofCanvas({
           </div>
         )}
       </CanvasCard>
-      {/* Right rail: inductive then definition sheets, stacked from the top.
-          Each card's vertical slot comes from its stackIndex (CSS var), so the
-          row gap can tighten under the container query without recomputing
-          offsets in JS. First card opens by default; the rest collapse in tight
-          mode. Direct children of .visual-view to keep the staggered reveal and
-          the drag offsetParent intact. */}
-      {inductives.map((definition, index) => (
-        <DefinitionCard
-          key={`${state.session.lessonId}-${definition.name}`}
-          cardKey={`${state.session.lessonId}-${definition.name}`}
-          title={`data ${definition.name}`}
-          anchor="right"
-          initial={{ x: 24, y: 72 }}
-          stackIndex={index}
-          defaultOpen={false}
-          note="Cases and induction are generated from these constructors."
-        >
-          <code><TokenSpans segments={inductiveToSegments(definition, DEFINITION_CARD_CODE_COLUMNS)} /></code>
-        </DefinitionCard>
-      ))}
-      {definitions.map((definition, index) => (
-        <DefinitionCard
-          key={`${state.session.lessonId}-${definition.name}`}
-          cardKey={`${state.session.lessonId}-${definition.name}`}
-          title={`${definition.name} : ${definition.type}`}
-          anchor="right"
-          initial={{ x: 24, y: 72 }}
-          stackIndex={inductives.length + index}
-          defaultOpen={false}
-          note="These equations are the available computation rules."
-        >
-          {definition.clauses.map((clause) => <code key={clause.script}><TokenSpans segments={clauseToSegments(definition.name, clause, DEFINITION_CARD_CODE_COLUMNS)} /></code>)}
-        </DefinitionCard>
-      ))}
+      {/* Right rail: inductive then definition sheets, stacked from the top as a
+          real in-flow flex column. Each card is expanded by default; collapsing
+          one pushes the cards below it up (and re-expanding pushes them back
+          down) — no absolute slot arithmetic, no overlay. The rail container is
+          positioned against the right edge and scrolls internally if the
+          expanded column exceeds the canvas height, so the stage itself never
+          scrolls. Cards keep their drag offset via CSS translate (see
+          CanvasCard `stacked`). */}
+      {(inductives.length > 0 || definitions.length > 0) && (
+        <div className="definition-rail">
+          {inductives.map((definition) => (
+            <DefinitionCard
+              key={`${state.session.lessonId}-${definition.name}`}
+              cardKey={`${state.session.lessonId}-${definition.name}`}
+              title={`data ${definition.name}`}
+              anchor="right"
+              initial={{ x: 24, y: 72 }}
+              note="Cases and induction are generated from these constructors."
+            >
+              <code><TokenSpans segments={inductiveToSegments(definition, DEFINITION_CARD_CODE_COLUMNS)} /></code>
+            </DefinitionCard>
+          ))}
+          {definitions.map((definition) => (
+            <DefinitionCard
+              key={`${state.session.lessonId}-${definition.name}`}
+              cardKey={`${state.session.lessonId}-${definition.name}`}
+              title={`${definition.name} : ${definition.type}`}
+              anchor="right"
+              initial={{ x: 24, y: 72 }}
+              note="These equations are the available computation rules."
+            >
+              {definition.clauses.map((clause) => <code key={clause.script}><TokenSpans segments={clauseToSegments(definition.name, clause, DEFINITION_CARD_CODE_COLUMNS)} /></code>)}
+            </DefinitionCard>
+          ))}
+        </div>
+      )}
       <div className="case-label">Current obligation · {currentGoal.label}</div>
       {isPropositionGoal(currentGoal) ? (
         <PropositionCard

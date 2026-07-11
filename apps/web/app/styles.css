@@ -211,19 +211,17 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
    horizontal scrolling.
 
    --rail        reserved gutter each side; the floating cards live inside it.
-   --def-card-w  right-rail definition/inductive card width.
+   --def-card-w  right-rail definition/inductive card width (== rail width).
    --ctx-card-w  left-rail context card width.
-   --def-row-gap vertical slot per right-rail card (tightens when collapsed).
-   --palette-reserve  bottom band kept clear for the move palette.
+   --palette-reserve  bottom band kept clear for the move palette (also caps the
+                 right-rail column's max-height so it scrolls before the stage).
    --eq-min-height / --eq-pad / --eq-fs  the hero equation sheet in each mode. */
 .visual-view {
   position: relative; margin: 0 auto; text-align: center;
   /* Roomy defaults (stage content >= ~1180px). */
   --rail: clamp(300px, 22cqw, 340px);
-  --def-card-w: 285px;
-  --def-card-roomy: 285px;  /* the width the 36-column code budget assumes */
+  --def-card-w: 285px;  /* the width the 36-column code budget assumes */
   --ctx-card-w: 250px;
-  --def-row-gap: 150px;
   --palette-reserve: 280px;
   --eq-min-height: 170px;
   --eq-pad: 42px 34px;
@@ -363,20 +361,54 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .canvas-card-handle:active { cursor: grabbing; background: #e8ddc2; }
 .canvas-card-handle > span { color: var(--cyan-ink); font-size: var(--fs-md); }
 .canvas-card-body { padding: 11px; }
-/* Right-rail definition/inductive sheets: width from a var so tight mode can
-   shrink them, and an undragged card's top derives from --card-index * the
-   row gap, so collapsing a card lets the whole column ride up in tight mode. */
-.definition-canvas-card { width: var(--def-card-w, 285px); top: calc(72px + var(--card-index, 0) * var(--def-row-gap, 150px)); }
+/* Right-rail definition/inductive column: a real in-flow flex stack pinned to
+   the right edge of the board. Expanding/collapsing a card reflows the ones
+   below it (no absolute slots, no overlay). If the expanded column outgrows the
+   board it scrolls internally — max-height is the stage minus the top offset and
+   a bottom margin — so the stage itself never scrolls. The cards inside are
+   position:static (see .definition-canvas-card) and offset on drag via
+   translate. Sits above the centered flow (z-index) and clears the palette band
+   at the bottom via the max-height budget.
+
+   A vertical scroll container clips its overflow on BOTH axes, so to let a card
+   dragged leftward (its natural direction, into the board) keep a VISIBLE
+   horizontal offset the rail is widened by --rail-drag-room and padded on the
+   left; the cards hug the right edge (align-items:flex-end) at the same visual
+   spot, and the extra padded band is drag headroom that the scroller no longer
+   clips. That padded band would otherwise sit over the board and swallow clicks,
+   so the rail is pointer-transparent and only the cards re-enable pointers. */
+.definition-rail {
+  --rail-drag-room: 180px;
+  position: absolute; z-index: 3; top: 72px; right: 24px;
+  box-sizing: content-box;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 14px;
+  width: var(--def-card-w, 285px);
+  padding-left: var(--rail-drag-room);
+  max-height: calc(100cqh - 72px - var(--palette-reserve, 280px) - 24px);
+  overflow-y: auto; overflow-x: hidden;
+  pointer-events: none;
+}
+/* In-flow definition/inductive sheets: static so the flex column controls their
+   vertical position; full card width; translate carries any drag offset; pointer
+   events re-enabled (the rail itself is transparent to them). */
+.definition-canvas-card { position: static; width: var(--def-card-w, 285px); flex: 0 0 auto; pointer-events: auto; }
 .definition-canvas-card code { display: block; padding: 4px 2px; color: #29483f; font: var(--fs-sm)/1.35 var(--mono); white-space: pre; }
 .definition-canvas-card small, .context-canvas-card small { display: block; margin-top: 8px; color: var(--ink-muted); font-size: var(--fs-2xs); line-height: 1.4; }
-/* Collapsible header: name/type-signature title truncates, chevron toggles. */
+/* Collapsible header: name/type-signature title truncates, chevron toggles.
+   The chevron is visible in EVERY mode (expansion is always meaningful) with a
+   generous ≥40px drafting-table hit area — a bigger glyph in a padded button
+   whose invisible pseudo-element overhangs to the full header height. */
 .definition-card-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.definition-card-toggle { flex: 0 0 auto; margin-left: auto; border: 0; padding: 0 2px; background: transparent; color: var(--cyan-ink); font-size: var(--fs-sm); line-height: 1; cursor: pointer; opacity: .8; transition: opacity .16s; }
+.definition-card-toggle {
+  position: relative; flex: 0 0 auto; margin: -8px -6px -8px auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 40px; min-height: 40px; padding: 0;
+  border: 0; background: transparent; color: var(--cyan-ink); cursor: pointer;
+  opacity: .85; transition: opacity .16s;
+}
 .definition-card-toggle:hover { opacity: 1; }
-/* Roomy mode: cards are always expanded, so the chevron is decorative-only and
-   hidden; the body always shows. Tight mode (@container) reveals the chevron
-   and collapses .is-collapsed bodies to the header alone. */
-.definition-canvas-card .definition-card-toggle { display: none; }
+.definition-card-toggle::after { content: ""; position: absolute; inset: -2px; }
+.definition-card-chevron { font-size: var(--fs-lg); line-height: 1; }
 .context-list { display: grid; gap: 7px; }
 .context-list code { padding: 8px 10px; border-radius: var(--radius-input); background: rgba(34, 48, 44, .07); font: var(--fs-base) var(--mono); }
 .hypothesis-card { margin-top: 20px; padding: 14px; border: 1px solid var(--mint-line); border-radius: var(--radius-card); background: var(--mint); cursor: grab; box-shadow: 0 5px 18px rgba(23, 107, 77, .14); transition: border-color .16s, box-shadow .16s; }
@@ -410,13 +442,24 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
    nth-of-type(section) — not nth-child — so the conditional context menu
    cannot reshuffle (and restart) finished animations. */
 @keyframes rise-in { from { opacity: 0; translate: 0 14px; } to { opacity: 1; translate: 0 0; } }
+/* Definition cards carry a drag offset on the `translate` property, so their
+   reveal must NOT animate translate (rise-in's `both` fill would then pin them
+   back to 0 and swallow the drag). The rail container rises as a unit, and the
+   cards inside just fade — leaving each card's translate free for dragging. */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .visual-view > .canvas-card,
+.visual-view > .definition-rail,
 .visual-view > .case-label,
 .visual-view > .scope-box,
 .visual-view > .equation-card,
 .visual-view > .gesture-hint,
 .visual-view > .canvas-help,
 .visual-view > .move-palette { animation: rise-in .55s cubic-bezier(.22, 1, .36, 1) both; }
+.definition-rail > .canvas-card { animation: fade-in .5s ease both; }
+.definition-rail > .canvas-card:nth-of-type(2) { animation-delay: 60ms; }
+.definition-rail > .canvas-card:nth-of-type(3) { animation-delay: 120ms; }
+.definition-rail > .canvas-card:nth-of-type(4) { animation-delay: 180ms; }
+.definition-rail > .canvas-card:nth-of-type(5) { animation-delay: 240ms; }
 .visual-view > section.canvas-card:nth-of-type(2) { animation-delay: 40ms; }
 .visual-view > section.canvas-card:nth-of-type(3) { animation-delay: 80ms; }
 .visual-view > section.canvas-card:nth-of-type(4) { animation-delay: 120ms; }
@@ -511,24 +554,30 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
      rail   = clamp(300px, 22cqw, 340px)        (>=300px)
      eq band= 100cqw - 2*rail - 56  -> centered, capped 1000px
      right rail footprint = 24 + 285 = 309 <= 300..340 rail  (clears the band)
-     def cards render fully expanded (chevron hidden, body always shown).
+     def cards render expanded by default; the rail flex column flows and
+     scrolls internally if the expanded stack outgrows the board.
 
-   In roomy mode definition cards are always open regardless of toggle state. */
-.definition-canvas-card .canvas-card-body { display: block; }
+   Cards are expanded by default in every mode; the chevron collapses a card to
+   its header (which reflows the ones below it) and is visible in every mode. */
+.definition-canvas-card.is-open .canvas-card-body { display: block; }
+.definition-canvas-card.is-collapsed .canvas-card-body { display: none; }
 
 @container proof-stage ((width < 1180px) or (height < 820px)) {
   /* TIGHT fit (worst case a 1280x800 window -> stage content ~1065px):
-       --rail        = clamp(268px, 23cqw, 300px) -> 268px at 1065cqw
-       eq band       = 1065 - 2*268 - 56 = 473px, centered [296..769]
-       right card    left edge = 1065 - 24 - 236 = 805px  (>= 769, clears band)
-       left card     right edge = 22 + 224 = 246px         (<= 296, clears band)
-       column height = 72 + (5-1)*48 + 36 = 300px          (fits ~600px stage)
+       --rail        = clamp(309px, 29cqw, 320px) -> 309px at 1065cqw
+       eq band       = 1065 - 2*309 - 56 = 391px, centered [337..728]
+       right rail     footprint = 24 + 285 = 309px = rail (clears band)
+       left card      right edge = 22 + 224 = 246px  (<= 337, clears band)
+       Cards keep the 285px width the 36-column pretty-printer budget assumes,
+       so tight-mode code renders un-clipped even though every card is expanded
+       by default now. The rail is a flex column: an expanded stack that outgrows
+       the board scrolls INSIDE the rail (max-height budget below), so the stage
+       still never scrolls.
        palette (7 moves, 2 cols) = 4 rows * 40 + 3*7 = 181px < 200px reserve. */
   .visual-view {
-    --rail: clamp(268px, 23cqw, 300px);
-    --def-card-w: 236px;
+    --rail: clamp(309px, 29cqw, 320px);
+    --def-card-w: 285px;
     --ctx-card-w: 224px;
-    --def-row-gap: 48px;
     --palette-reserve: 172px;
     --eq-min-height: 108px;
     --eq-pad: 22px 22px;
@@ -544,19 +593,9 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
      dropped in tight mode to reclaim the column. */
   .canvas-help { display: none; }
 
-  /* Collapsible definition cards: chevron appears; a collapsed card is just its
-     header (~37px). An expanded card's body overlays downward with a raised
-     z-index, so expanding one never shifts the fixed-slot column below it. */
-  .definition-canvas-card .definition-card-toggle { display: inline-block; }
-  .definition-canvas-card.is-collapsed .canvas-card-body { display: none; }
-  .definition-canvas-card.is-open { z-index: 5; }
-  /* An EXPANDED card already overlays (z-index), so give it the full roomy
-     width the pretty-printer budget assumes (DEFINITION_CARD_CODE_COLUMNS = 36
-     is derived from the 285px roomy card, not the 236px collapsed rail width).
-     Right-anchored, so the extra width grows leftward over the board and the
-     36-column code renders un-clipped (append/revAcc clauses). Collapsed cards
-     stay at the 236px --def-card-w so the rail arithmetic above still holds. */
-  .definition-canvas-card.is-open { width: var(--def-card-roomy, 285px); }
+  /* The rail gap tightens so a full expanded stack packs denser before it needs
+     to scroll internally. Chevron + collapse behaviour is identical to roomy. */
+  .definition-rail { gap: 10px; }
 
   /* Compact chips: a touch tighter so a 4-row (7-move) palette clears ~170px. */
   .move-palette button { padding: 7px 12px; }
@@ -707,7 +746,7 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   .visual-view > .equation-card { order: -2; }
   .visual-view > .gesture-hint { order: -1; }
   .visual-view > .context-canvas-card { order: 1; }
-  .visual-view > .definition-canvas-card { order: 2; }
+  .visual-view > .definition-rail { order: 2; }
   .visual-view > .move-palette { order: 3; }
   /* Neutralise the centered-flow width caps so the equation card is full-width. */
   .visual-view > .equation-card,
@@ -731,9 +770,9 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 
   /* --- Canvas cards: absolute -> static, full-width accordions ------------- */
   .canvas-card {
-    position: static; transform: none; width: 100%; margin: 0 0 12px;
-    /* Undo any dragged inline left/top (inline styles set left/top; static
-       ignores them, but reset any leaked top from --card-index too). */
+    position: static; transform: none; translate: none !important; width: 100%; margin: 0 0 12px;
+    /* Undo any dragged inline offset (left-anchored cards set inline left/top;
+       stacked cards set an inline translate) so every card sits in the flow. */
     top: auto; left: auto; right: auto;
   }
   /* The card is static in the stacked flow, so its header is never dragged here.
@@ -741,18 +780,15 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
      vertical scroll gesture whenever a thumb lands on a card header (e.g. tapping
      a definition-card title to expand it). Hand touch back to the page. */
   .canvas-card-handle { touch-action: auto; cursor: pointer; }
-  /* Definition/inductive cards: full-width, and the chevron accordion is live
-     (the @container block already reveals .definition-card-toggle and hides
-     .is-collapsed bodies; container-type:normal disables that block, so drive
-     the accordion from the media query instead). */
+  /* The definition rail sheds its right-edge pinning and internal scroll: it
+     flows full-width in the stacked column, its cards are full-width accordions.
+     The chevron (≥40px hit area, expanded-by-default, .is-collapsed hides the
+     body) already comes from the base rules — no mobile-specific override needed. */
+  .definition-rail {
+    position: static; width: 100%; max-height: none; overflow: visible;
+    gap: 12px; padding-right: 0;
+  }
   .definition-canvas-card { width: 100%; }
-  .definition-canvas-card .definition-card-toggle { display: inline-block; }
-  .definition-canvas-card.is-collapsed .canvas-card-body { display: none; }
-  /* The chevron was a 10x12px glyph — far too small to tap. Grow its touch box
-     to the full header height with padding and an overhanging pseudo-element so
-     the whole right end of the header row toggles the accordion. */
-  .definition-card-toggle { position: relative; padding: 8px 10px; margin: -8px -8px -8px 0; font-size: var(--fs-md); }
-  .definition-card-toggle::after { content: ""; position: absolute; inset: -4px -2px; }
   /* Belt-and-braces: if a code line still overruns, let it scroll rather than
      force the whole page wide. */
   .canvas-card-body code, .canvas-card-body pre { overflow-x: auto; }
@@ -790,6 +826,8 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
      choreography adds nothing, so disable the stagger and its delays entirely
      — cards simply appear. */
   .visual-view > .canvas-card,
+  .visual-view > .definition-rail,
+  .definition-rail > .canvas-card,
   .visual-view > .case-label,
   .visual-view > .scope-box,
   .visual-view > .equation-card,

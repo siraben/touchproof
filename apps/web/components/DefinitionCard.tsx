@@ -3,18 +3,19 @@
 import { useState } from "react";
 import { CanvasCard } from "./CanvasCard";
 
-/** A definition / inductive sheet in the right rail. In roomy mode it renders
- * expanded like any canvas card; in tight mode (container query) the body
- * collapses to just the header, and a chevron toggles it. Still draggable in
- * either state (the header is the CanvasCard drag handle). Collapse state is
- * local UI, reset per lesson by the `cardKey`-derived React key upstream. */
+/** A definition / inductive sheet in the right rail. Cards live in-flow inside
+ * the stacked rail column and render expanded by default in every mode; the
+ * chevron collapses one to its header alone, pushing the cards below it up
+ * (and back down when re-expanded). Still draggable in either state (the header
+ * is the CanvasCard drag handle, which offsets the card via CSS translate).
+ * Collapse state is local UI, reset per lesson by the `cardKey`-derived React
+ * key upstream. */
 export function DefinitionCard({
   cardKey,
   title,
   anchor,
   initial,
-  stackIndex,
-  defaultOpen,
+  defaultOpen = true,
   note,
   children,
 }: {
@@ -22,8 +23,7 @@ export function DefinitionCard({
   title: string;
   anchor: "left" | "right";
   initial: { x: number; y: number };
-  stackIndex: number;
-  defaultOpen: boolean;
+  defaultOpen?: boolean;
   note: string;
   children: React.ReactNode;
 }) {
@@ -41,7 +41,7 @@ export function DefinitionCard({
           event.stopPropagation();
           setOpen((value) => !value);
         }}
-      >{open ? "▾" : "▸"}</button>
+      ><span className="definition-card-chevron" aria-hidden="true">{open ? "▾" : "▸"}</span></button>
     </>
   );
   return (
@@ -50,7 +50,7 @@ export function DefinitionCard({
       title={heading}
       anchor={anchor}
       initial={initial}
-      stackIndex={stackIndex}
+      stacked
       className={`definition-canvas-card ${open ? "is-open" : "is-collapsed"}`}
     >
       {children}
