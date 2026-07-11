@@ -190,12 +190,18 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   /* Roomy defaults (stage content >= ~1180px). */
   --rail: clamp(300px, 22cqw, 340px);
   --def-card-w: 285px;
+  --def-card-roomy: 285px;  /* the width the 36-column code budget assumes */
   --ctx-card-w: 250px;
   --def-row-gap: 150px;
   --palette-reserve: 280px;
   --eq-min-height: 170px;
   --eq-pad: 42px 34px;
-  --eq-fs: var(--fs-display);
+  /* Hero equation font sizes off the STAGE (cqw), not the viewport. Using the
+     viewport-based --fs-display here mixed a vw font with a cqw-driven band, so
+     under browser zoom / a narrow container the font tracked the viewport while
+     its band tracked the container and the two could drift out of proportion.
+     A cqw clamp keeps the font in step with the band it lives in at every zoom. */
+  --eq-fs: clamp(22px, 3cqw, 38px);
   min-height: 600px;
   padding-bottom: var(--palette-reserve);
 }
@@ -284,6 +290,11 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .move-palette { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4; display: grid; grid-template-columns: repeat(2, 250px); justify-content: center; align-items: stretch; gap: 7px; width: 520px; overflow: visible; margin: 0; text-align: left; }
 .move-palette button { position: relative; display: flex; gap: 10px; align-items: center; padding: 9px 13px; border: 1px solid var(--vellum-edge); border-radius: var(--radius-chip); background: var(--grain), linear-gradient(180deg, rgba(251, 247, 234, .97), rgba(239, 230, 207, .97)); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-card); transition: transform .16s, border-color .16s, box-shadow .16s; }
 .move-palette button:hover { border-color: var(--cyan-strong); transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 1px 2px rgba(4, 10, 18, .5), 0 16px 32px rgba(4, 10, 18, .5); }
+/* While busy the chips are click-guarded via aria-disabled (not the disabled
+   attribute — that would break hover/tooltip after re-enable). Dim them and
+   suppress the hover lift, but the .move-tip tooltip still shows on hover. */
+.move-palette button[aria-disabled="true"] { opacity: .55; cursor: default; }
+.move-palette button[aria-disabled="true"]:hover { transform: none; border-color: var(--vellum-edge); box-shadow: var(--shadow-card); }
 .move-palette button > span:first-child { color: var(--cyan-ink); font-size: var(--fs-lg); flex: 0 0 auto; line-height: 1; }
 .move-palette .move-chip strong { font-size: var(--fs-base); font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -499,6 +510,13 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   .definition-canvas-card .definition-card-toggle { display: inline-block; }
   .definition-canvas-card.is-collapsed .canvas-card-body { display: none; }
   .definition-canvas-card.is-open { z-index: 5; }
+  /* An EXPANDED card already overlays (z-index), so give it the full roomy
+     width the pretty-printer budget assumes (DEFINITION_CARD_CODE_COLUMNS = 36
+     is derived from the 285px roomy card, not the 236px collapsed rail width).
+     Right-anchored, so the extra width grows leftward over the board and the
+     36-column code renders un-clipped (append/revAcc clauses). Collapsed cards
+     stay at the 236px --def-card-w so the rail arithmetic above still holds. */
+  .definition-canvas-card.is-open { width: var(--def-card-roomy, 285px); }
 
   /* Compact chips: a touch tighter so a 4-row (7-move) palette clears ~170px. */
   .move-palette button { padding: 7px 12px; }
@@ -538,23 +556,134 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   .kernel-badge { font-size: 0; gap: 0; }
 }
 
+/* ==========================================================================
+   MOBILE (≤800px): STACKED DOCUMENT FLOW
+   The drafting-board metaphor (absolutely-positioned floating cards, a
+   fixed-position palette, transform-scaled sheets) does not survive a phone.
+   Below 800px the whole board degrades to a single vertical column: obligation
+   tabs, case label, the hero equation card, the gesture hint, then the Local
+   context card, then definition cards as full-width collapsed accordions, then
+   the move list as full-width single-column chips. No absolute positioning, no
+   transform scaling, no horizontal scroll. The stage scrolls internally.
+
+   This media query is authored AFTER the @container tight-mode block, so it
+   wins the cascade; where the tight block's absolute-position knobs would leak
+   into the stacked flow, they are explicitly neutralised here. */
 @media (max-width: 800px) {
-  .topbar { grid-template-columns: 1fr auto; padding: 0 16px; }
+  /* --- Header: keep every control labeled and tappable (no 7px dots) -------- */
+  /* backdrop-filter would make the topbar the containing block for fixed
+     descendants, trapping the bottom view-switch inside the header. */
+  .topbar { grid-template-columns: auto 1fr; gap: 10px; padding: 0 14px; backdrop-filter: none; }
   .view-switch { order: 3; position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 30; background: var(--board-raised); box-shadow: var(--shadow); }
-  .kernel-badge, .header-actions > button:not(.history-button) { font-size: 0; }
-  .header-actions > button:not(.history-button) { width: 7px; height: 7px; padding: 0; border-radius: 50%; background: #4f6b8a; }
   .brand small { display: none; }
-  .lesson-strip { grid-template-columns: 1fr auto; padding: 22px 18px; }
+  /* Kernel lamp keeps its glow but sheds its label to save room. */
+  .kernel-badge { font-size: 0; gap: 0; }
+  .header-actions { gap: 4px; }
+  /* Real small labeled buttons, wrapped in --fs-2xs, instead of unlabeled dots. */
+  .header-actions > button:not(.history-button) {
+    font-size: var(--fs-2xs); width: auto; height: auto; padding: 5px 7px; border-radius: 7px;
+    border: 1px solid var(--hairline); background: rgba(125, 211, 252, .06); color: var(--text);
+  }
+  .header-actions > button:not(.history-button):disabled { opacity: .35; }
+
+  /* --- Title strip: drop the procedure note, tighten padding --------------- */
+  .lesson-strip { grid-template-columns: 1fr auto; gap: 16px; padding: 18px 16px; }
   .lesson-strip p { display: none; }
-  .body-grid { grid-template-columns: 1fr; }
-  .context-panel { border-right: 0; border-bottom: 1px solid var(--hairline); max-height: 190px; overflow: auto; }
-  .proof-stage { padding: 20px 14px 90px; }
-  .visual-view { min-width: 720px; }
-  .canvas-card { transform: scale(.88); transform-origin: top left; }
-  .equation-card { min-height: 150px; padding: 30px 16px; gap: 14px; overflow-x: auto; justify-content: flex-start; }
-  /* The bottom-center band is occupied by the fixed view-switch on mobile and
-     the 720px canvas cannot clear canvas-help, so keep the palette as the
-     original right-anchored single column here. */
-  .move-palette { left: auto; right: 20px; transform: none; grid-template-columns: 1fr; width: 250px; }
-  .move-palette .next-lesson { width: 250px; }
+
+  /* --- Body: learning path becomes a horizontal strip, stage fills the rest.
+     No dead space: the grid rows size to content (path) then 1fr (stage). --- */
+  .body-grid { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+
+  /* Learning path: a horizontally scrolling row of compact lesson chips, no
+     capped-height dead space below. */
+  .context-panel {
+    border-right: 0; border-bottom: 1px solid var(--hairline);
+    max-height: none; padding: 10px 14px;
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .context-panel h2 { margin: 0 0 8px; }
+  .lesson-list { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: max-content; gap: 8px; margin: 0; }
+  .lesson-list button { flex-direction: row; gap: 8px; padding: 7px 11px; border: 1px solid var(--hairline); border-radius: var(--radius-pill); white-space: nowrap; }
+  /* Compact chip: number badge + short title only; concept subtitle is dropped
+     to keep the strip a single low row. */
+  .lesson-list button small { display: none; }
+  .lesson-list button strong { white-space: nowrap; }
+  .lesson-source { display: none; }
+  /* Themed horizontal scrollbar on the path strip. */
+  .context-panel { scrollbar-width: thin; scrollbar-color: rgba(125, 211, 252, .25) transparent; }
+
+  /* --- The stage becomes normal document flow ----------------------------- */
+  .proof-stage { padding: 16px 14px 92px; container-type: normal; }
+  .obligation-tabs { flex-wrap: wrap; margin-bottom: 16px; }
+
+  /* .visual-view sheds every drafting-board knob: no reserved rails, no bottom
+     palette band, no min-width forcing horizontal scroll. Cards flow. */
+  .visual-view {
+    min-width: 0; min-height: 0; text-align: left;
+    --rail: 0px; --palette-reserve: 0;
+    display: flex; flex-direction: column; align-items: stretch;
+    padding-bottom: 0;
+  }
+  /* Reorder the flow so the equation stays the hero at the top of the column.
+     The DOM order is context card -> definition cards -> case label -> equation
+     -> hint -> palette; `order` reshuffles it to the stacked spec: case label,
+     equation, hint, then the Local context card, then definitions, then moves.
+     (Default order is 0; negatives float up, larger values sink.) */
+  .visual-view > .case-label { order: -3; }
+  .visual-view > .scope-box,
+  .visual-view > .equation-card { order: -2; }
+  .visual-view > .gesture-hint { order: -1; }
+  .visual-view > .context-canvas-card { order: 1; }
+  .visual-view > .definition-canvas-card { order: 2; }
+  .visual-view > .move-palette { order: 3; }
+  /* Neutralise the centered-flow width caps so the equation card is full-width. */
+  .visual-view > .equation-card,
+  .visual-view > .scope-box { max-width: none; width: 100%; margin: 0 0 14px; }
+  .visual-view > .case-label { margin: 0 0 8px; text-align: left; }
+  .visual-view > .gesture-hint { margin: 0 0 16px; }
+
+  .equation-card { min-height: 0; padding: 24px 16px; gap: 12px; }
+  /* Scope boxes annotate in flow, full width. */
+  .scope-box .equation-card { margin: 0; }
+
+  /* --- Canvas cards: absolute -> static, full-width accordions ------------- */
+  .canvas-card {
+    position: static; transform: none; width: 100%; margin: 0 0 12px;
+    /* Undo any dragged inline left/top (inline styles set left/top; static
+       ignores them, but reset any leaked top from --card-index too). */
+    top: auto; left: auto; right: auto;
+  }
+  /* Definition/inductive cards: full-width, and the chevron accordion is live
+     (the @container block already reveals .definition-card-toggle and hides
+     .is-collapsed bodies; container-type:normal disables that block, so drive
+     the accordion from the media query instead). */
+  .definition-canvas-card { width: 100%; }
+  .definition-canvas-card .definition-card-toggle { display: inline-block; }
+  .definition-canvas-card.is-collapsed .canvas-card-body { display: none; }
+  /* Belt-and-braces: if a code line still overruns, let it scroll rather than
+     force the whole page wide. */
+  .canvas-card-body code, .canvas-card-body pre { overflow-x: auto; }
+
+  /* --- Move palette: full-width single-column chips, in flow -------------- */
+  .move-palette {
+    position: static; left: auto; right: auto; bottom: auto; transform: none;
+    display: grid; grid-template-columns: 1fr; width: 100%; gap: 8px; margin: 4px 0 0;
+    overflow: visible;
+  }
+  .move-palette .next-lesson { width: 100%; grid-column: 1; justify-self: stretch; }
+  .move-palette .move-chip strong { white-space: normal; }
+
+  /* --- Kill the lesson-load stagger on mobile ------------------------------
+     The staggered rise-in leaves delayed children holding their `both`-fill
+     `from` state (opacity:0) until their delay elapses; combined with the flow
+     reflow this reads as a card stuck half-faded. In the stacked column the
+     choreography adds nothing, so disable the stagger and its delays entirely
+     — cards simply appear. */
+  .visual-view > .canvas-card,
+  .visual-view > .case-label,
+  .visual-view > .scope-box,
+  .visual-view > .equation-card,
+  .visual-view > .gesture-hint,
+  .visual-view > .canvas-help,
+  .visual-view > .move-palette { animation: none; opacity: 1; translate: none; }
 }

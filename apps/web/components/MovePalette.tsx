@@ -27,7 +27,11 @@ export function MovePalette({
   return (
     <div className="move-palette">
       {solved && nextLesson !== undefined && (
-        <button className="next-lesson" disabled={busy} onClick={() => onStartLesson(nextLesson.id)}>
+        <button
+          className="next-lesson"
+          aria-disabled={busy}
+          onClick={() => { if (!busy) onStartLesson(nextLesson.id); }}
+        >
           <span>→</span>
           <div><strong>Next lesson</strong><small>{nextLesson.title}</small></div>
         </button>
@@ -36,8 +40,14 @@ export function MovePalette({
         <button
           key={move.id}
           className="move-chip"
-          disabled={busy}
-          onClick={() => onMove(move.id)}
+          /* aria-disabled + a click guard rather than the `disabled` attribute:
+             a truly-disabled button stops firing hover/pointer events, so after
+             a click flips `busy` and back the chip's :hover (and thus its
+             .move-tip tooltip) would only return after the pointer left and
+             re-entered. Keeping the chip enabled preserves hover across the busy
+             toggle and keeps it keyboard-focusable. */
+          aria-disabled={busy}
+          onClick={() => { if (!busy) onMove(move.id); }}
           {...previewProps(move)}
         >
           <span>{moveIcon(move)}</span>

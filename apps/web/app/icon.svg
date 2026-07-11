@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The brand mark: a vellum sheet with the drafting-table corner radii
+       (10 10 10 3 at 34px, scaled to 64) and the italic serif T in ink navy. -->
+  <defs>
+    <linearGradient id="vellum" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbf7ea"/>
+      <stop offset="1" stop-color="#efe6cf"/>
+    </linearGradient>
+  </defs>
+  <path d="M20 1 H44 A19 19 0 0 1 63 20 V44 A19 19 0 0 1 44 63 H7 A6 6 0 0 1 1 57 V20 A19 19 0 0 1 20 1 Z"
+        fill="url(#vellum)" stroke="#d8cdaf" stroke-width="2"/>
+  <text x="34" y="45" text-anchor="middle" font-family="'STIX Two Text','Times New Roman',Georgia,serif"
+        font-style="italic" font-weight="600" font-size="40" fill="#0a1220">T</text>
+</svg>
