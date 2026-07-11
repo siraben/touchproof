@@ -141,10 +141,10 @@ function Expression({
       const needsParens = value.kind === "call";
       return <><span className="function-name">negb</span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
     }
-    if (expression.name === "rev" && expression.args.length === 1) {
+    if ((expression.name === "rev" || expression.name === "length") && expression.args.length === 1) {
       const value = expression.args[0]!;
       const needsParens = value.kind === "call" || (value.kind === "ctor" && value.name !== "nil");
-      return <><span className="function-name">rev</span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
+      return <><span className="function-name">{expression.name}</span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
     }
     if (expression.name === "revAcc" && expression.args.length === 2) {
       return <><span className="function-name">revAcc</span><span className="argument"><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /></span><span className="argument">(<Expression expression={expression.args[1]!} moves={moves} onMove={onMove} />)</span></>;
@@ -456,7 +456,8 @@ export function ProofWorkspace() {
           </div>
 
           {view === "visual" && currentGoal !== undefined && (
-            <div className="visual-view">
+            /* Keyed by lesson so the staggered drafting-table reveal replays on lesson load. */
+            <div className="visual-view" key={state.session.lessonId}>
               <CanvasCard key={`context-${state.session.lessonId}-${currentGoal.id}`} title="Local context" initial={{ x: 22, y: 72 }} className="context-canvas-card">
                 <div className="context-list">
                   {currentGoal.context.length === 0 ? <small>No variables yet—just compute.</small> : currentGoal.context.map((binding) => <code key={binding}>{binding}</code>)}
@@ -548,6 +549,10 @@ export function ProofWorkspace() {
                     >=</button>
                     <Expression expression={currentGoal.right} moves={state.moves} onMove={(moveId) => void send({ kind: "apply-move", moveId })} />
                   </span>
+                  {progress.total > 0 && progress.solved === progress.total && (
+                    /* Mounts exactly when the last obligation closes, so the stamp-in animation plays once. */
+                    <div className="qed-stamp" aria-hidden="true">Q.E.D.</div>
+                  )}
                 </div>
               </ScopeBox>
               {contextualMoves.length > 0 && (
