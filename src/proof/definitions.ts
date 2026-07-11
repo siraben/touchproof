@@ -39,6 +39,10 @@ export const programDefinitions: readonly ProgramDefinition[] = [
     clause("nil", ["nil"], "nil", "rev [] = []"),
     clause("cons", ["cons(x, xs)"], "append(rev(xs), cons(x, nil))", "rev (x :: xs) = rev xs ++ [x]"),
   ] },
+  { name: "length", arity: 1, type: "List A → Nat", clauses: [
+    clause("nil", ["nil"], "zero", "length [] = 0"),
+    clause("cons", ["cons(x, xs)"], "succ(length(xs))", "length (x :: xs) = S (length xs)"),
+  ] },
   { name: "revAcc", arity: 2, type: "List A → List A → List A", clauses: [
     clause("nil", ["nil", "acc"], "acc", "revAcc [] acc = acc"),
     clause("cons", ["cons(x, xs)", "acc"], "revAcc(xs, cons(x, acc))", "revAcc (x :: xs) acc = revAcc xs (x :: acc)"),

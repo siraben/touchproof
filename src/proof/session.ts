@@ -183,6 +183,60 @@ export const lessonCatalog: readonly Lesson[] = [
     source: "Inspired by Software Foundations, Logical Foundations: Poly",
     sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html",
   },
+  {
+    id: "nat-add-succ-right",
+    chapter: "11 · Natural numbers",
+    title: "Pushing a successor rightward",
+    concept: "Induction on the left argument",
+    theorem: "n + S m = S (n + m)",
+    source: "Adapted from Software Foundations, Logical Foundations: Induction",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html",
+  },
+  {
+    id: "nat-add-assoc",
+    chapter: "12 · Natural numbers",
+    title: "Addition is associative",
+    concept: "Nested data, one induction",
+    theorem: "(a + b) + c = a + (b + c)",
+    source: "Adapted from Software Foundations, Logical Foundations: Induction",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html",
+  },
+  {
+    id: "nat-add-comm",
+    chapter: "13 · Natural numbers",
+    title: "Addition is commutative",
+    concept: "Composing proved lemmas",
+    theorem: "a + b = b + a",
+    source: "Adapted from Software Foundations, Logical Foundations: Induction",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html",
+  },
+  {
+    id: "list-length-append",
+    chapter: "14 · Lists",
+    title: "Length of an append",
+    concept: "A list measure meets addition",
+    theorem: "length (xs ++ ys) = length xs + length ys",
+    source: "Adapted from Software Foundations, Logical Foundations: Lists",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html",
+  },
+  {
+    id: "list-length-rev",
+    chapter: "15 · Lists",
+    title: "Reverse preserves length",
+    concept: "Reusing a measure lemma",
+    theorem: "length (rev xs) = length xs",
+    source: "Adapted from Software Foundations, Logical Foundations: Lists",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html",
+  },
+  {
+    id: "list-map-length",
+    chapter: "16 · Higher-order functions",
+    title: "Map preserves length",
+    concept: "Higher-order functions preserve measure",
+    theorem: "length (map f xs) = length xs",
+    source: "Adapted from Software Foundations, Logical Foundations: Poly",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html",
+  },
 ] as const;
 
 export function equationToText(goal: Pick<EquationGoal, "left" | "right">): string {
@@ -287,6 +341,40 @@ const lessonSpecs: Readonly<Record<string, LessonSpec>> = {
         right: "append(rev(xs), append(cons(x, nil), acc))",
       }],
     },
+  },
+  "nat-add-succ-right": {
+    theorem: "add_succ_right", context: ["n : Nat", "m : Nat"], resultType: "Nat",
+    left: "add(n, succ(m))", right: "succ(add(n, m))", definitions: ["add"], inductives: ["Nat"],
+  },
+  "nat-add-assoc": {
+    theorem: "add_assoc", context: ["a : Nat", "b : Nat", "c : Nat"], resultType: "Nat",
+    left: "add(add(a, b), c)", right: "add(a, add(b, c))", definitions: ["add"], inductives: ["Nat"],
+  },
+  "nat-add-comm": {
+    theorem: "add_comm", context: ["a : Nat", "b : Nat"], resultType: "Nat",
+    left: "add(a, b)", right: "add(b, a)", definitions: ["add"], inductives: ["Nat"],
+    branchLemmas: {
+      "zero": [{ id: "lemma-add-zero-right", name: "add_zero_right", left: "add(b, zero)", right: "b" }],
+      "succ n": [{ id: "lemma-add-succ-right", name: "add_succ_right", left: "add(b, succ(n))", right: "succ(add(b, n))" }],
+    },
+  },
+  "list-length-append": {
+    theorem: "length_append", context: ["A : Type", "xs : List A", "ys : List A"], resultType: "Nat",
+    left: "length(append(xs, ys))", right: "add(length(xs), length(ys))", definitions: ["length", "append", "add"], inductives: ["List"],
+  },
+  "list-length-rev": {
+    theorem: "length_rev", context: ["A : Type", "xs : List A"], resultType: "Nat",
+    left: "length(rev(xs))", right: "length(xs)", definitions: ["length", "rev", "append", "add"], inductives: ["List"],
+    branchLemmas: {
+      "x :: xs": [
+        { id: "lemma-length-append", name: "length_append", left: "length(append(rev(xs), cons(x, nil)))", right: "add(length(rev(xs)), length(cons(x, nil)))" },
+        { id: "lemma-add-one-right", name: "add_one_right", left: "add(length(xs), succ(zero))", right: "succ(length(xs))" },
+      ],
+    },
+  },
+  "list-map-length": {
+    theorem: "map_length", context: ["A, B : Type", "f : A → B", "xs : List A"], resultType: "Nat",
+    left: "length(map(f, xs))", right: "length(xs)", definitions: ["length", "map"], inductives: ["List"],
   },
 };
 

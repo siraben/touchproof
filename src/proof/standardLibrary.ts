@@ -84,6 +84,13 @@ export function touchProofEnvironment(): Environment {
       v("acc"),
     ))),
   });
+  add("length", {
+    type: arrow(c("List"), c("Nat")),
+    value: lambda("xs", c("List"), recursor("List", lambda("_", c("List"), c("Nat")), [
+      c("zero"),
+      lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", c("Nat"), app(c("succ"), v("ih_tail"))))),
+    ], v("xs"))),
+  });
   add("compose", {
     type: pis([["f", arrow(c("Elem"), c("Elem"))], ["g", arrow(c("Elem"), c("Elem"))], ["x", c("Elem")]], c("Elem")),
     value: lambda("f", arrow(c("Elem"), c("Elem")), lambda("g", arrow(c("Elem"), c("Elem")), lambda("x", c("Elem"), app(v("f"), app(v("g"), v("x")))))),
@@ -147,6 +154,16 @@ export function touchProofEnvironment(): Environment {
   add("append_assoc", { type: appendAssoc.type, value: appendAssoc.term });
   const revAppend = revAppendProof();
   add("rev_append", { type: revAppend.type, value: revAppend.term });
+  const addZero = addZeroRightProof();
+  add("add_zero_right", { type: addZero.type, value: addZero.term });
+  const addSucc = addSuccRightProof();
+  add("add_succ_right", { type: addSucc.type, value: addSucc.term });
+  const addOne = addOneRightProof();
+  add("add_one_right", { type: addOne.type, value: addOne.term });
+  const addAssoc = addAssocProof();
+  add("add_assoc", { type: addAssoc.type, value: addAssoc.term });
+  const lengthAppend = lengthAppendProof();
+  add("length_append", { type: lengthAppend.type, value: lengthAppend.term });
   return env;
 }
 
@@ -173,6 +190,10 @@ function addDefinitionalEquations(add: (name: string, declaration: DefinitionInp
       lambda("acc", c("List"), refl(apps(c("revAcc"), c("nil"), v("acc"))))],
     ["revAcc_cons", pis([["x", c("Elem")], ["xs", c("List")], ["acc", c("List")]], equal(c("List"), apps(c("revAcc"), apps(c("cons"), v("x"), v("xs")), v("acc")), apps(c("revAcc"), v("xs"), apps(c("cons"), v("x"), v("acc"))))),
       lambda("x", c("Elem"), lambda("xs", c("List"), lambda("acc", c("List"), refl(apps(c("revAcc"), apps(c("cons"), v("x"), v("xs")), v("acc"))))))],
+    ["length_nil", equal(c("Nat"), app(c("length"), c("nil")), c("zero")),
+      refl(app(c("length"), c("nil")))],
+    ["length_cons", pis([["x", c("Elem")], ["xs", c("List")]], equal(c("Nat"), app(c("length"), apps(c("cons"), v("x"), v("xs"))), app(c("succ"), app(c("length"), v("xs"))))),
+      lambda("x", c("Elem"), lambda("xs", c("List"), refl(app(c("length"), apps(c("cons"), v("x"), v("xs"))))))],
   ];
   for (const [name, theoremType, value] of definitions) add(name, { type: theoremType, value });
 }
@@ -366,6 +387,332 @@ export function addZeroRightProof(): { readonly type: Term; readonly term: Term 
   return {
     type: pi("n", nat, proposition(v("n"))),
     term: apps(c("nat_induction"), motive, apps(c("add_zero_left"), c("zero")), successorCase),
+  };
+}
+
+/** The arithmetic bridge `n + S 0 = S n`, reused by length_rev. */
+export function addOneRightProof(): { readonly type: Term; readonly term: Term } {
+  const nat = c("Nat");
+  const n = v("n");
+  const add = (left: Term, right: Term): Term => apps(c("add"), left, right);
+  const succ = (value: Term): Term => app(c("succ"), value);
+  const proposition = (value: Term): Term => equal(nat, add(value, succ(c("zero"))), succ(value));
+  return {
+    type: pis([["n", nat]], proposition(n)),
+    term: lambda("n", nat, trans(
+      nat,
+      add(n, succ(c("zero"))),
+      succ(add(n, c("zero"))),
+      succ(n),
+      apps(c("add_succ_right"), n, c("zero")),
+      congr(nat, nat, c("succ"), add(n, c("zero")), n, apps(c("add_zero_right"), n)),
+    )),
+  };
+}
+
+export function addSuccRightProof(): { readonly type: Term; readonly term: Term } {
+  const nat = c("Nat");
+  const m = v("m");
+  const n = v("n");
+  const ih = v("ih");
+  const add = (left: Term, right: Term): Term => apps(c("add"), left, right);
+  const succ = (value: Term): Term => app(c("succ"), value);
+  const proposition = (value: Term): Term => equal(nat, add(value, succ(m)), succ(add(value, m)));
+  const motive = lambda("n", nat, proposition(v("n")));
+  const base = refl(add(c("zero"), succ(m)));
+  const succN = succ(n);
+  const target = succ(succ(add(n, m)));
+  const successorCase = lambda("n", nat, lambda("ih", proposition(n), trans(
+    nat,
+    add(succN, succ(m)),
+    succ(add(n, succ(m))),
+    succ(add(succN, m)),
+    apps(c("add_succ_left"), n, succ(m)),
+    trans(
+      nat,
+      succ(add(n, succ(m))),
+      target,
+      succ(add(succN, m)),
+      congr(nat, nat, c("succ"), add(n, succ(m)), succ(add(n, m)), ih),
+      symm(nat, succ(add(succN, m)), target, congr(nat, nat, c("succ"), add(succN, m), succ(add(n, m)), apps(c("add_succ_left"), n, m))),
+    ),
+  )));
+  return {
+    type: pis([["n", nat], ["m", nat]], proposition(v("n"))),
+    term: lambda("n", nat, lambda("m", nat, apps(c("nat_induction"), motive, base, successorCase, v("n")))),
+  };
+}
+
+export function addAssocProof(): { readonly type: Term; readonly term: Term } {
+  const nat = c("Nat");
+  const a = v("a");
+  const b = v("b");
+  const cc = v("c");
+  const ih = v("ih");
+  const add = (left: Term, right: Term): Term => apps(c("add"), left, right);
+  const succ = (value: Term): Term => app(c("succ"), value);
+  const proposition = (value: Term): Term => equal(nat, add(add(value, b), cc), add(value, add(b, cc)));
+  const motive = lambda("a", nat, proposition(v("a")));
+  const base = refl(add(add(c("zero"), b), cc));
+  const succA = succ(a);
+  const successorCase = lambda("a", nat, lambda("ih", proposition(a), trans(
+    nat,
+    add(add(succA, b), cc),
+    add(succ(add(a, b)), cc),
+    add(succA, add(b, cc)),
+    congr(nat, nat, lambda("front", nat, add(v("front"), cc)), add(succA, b), succ(add(a, b)), apps(c("add_succ_left"), a, b)),
+    trans(
+      nat,
+      add(succ(add(a, b)), cc),
+      succ(add(add(a, b), cc)),
+      add(succA, add(b, cc)),
+      apps(c("add_succ_left"), add(a, b), cc),
+      trans(
+        nat,
+        succ(add(add(a, b), cc)),
+        succ(add(a, add(b, cc))),
+        add(succA, add(b, cc)),
+        congr(nat, nat, c("succ"), add(add(a, b), cc), add(a, add(b, cc)), ih),
+        symm(nat, add(succA, add(b, cc)), succ(add(a, add(b, cc))), apps(c("add_succ_left"), a, add(b, cc))),
+      ),
+    ),
+  )));
+  return {
+    type: pis([["a", nat], ["b", nat], ["c", nat]], proposition(v("a"))),
+    term: lambda("a", nat, lambda("b", nat, lambda("c", nat, apps(c("nat_induction"), motive, base, successorCase, v("a"))))),
+  };
+}
+
+export function addCommProof(): { readonly type: Term; readonly term: Term } {
+  const nat = c("Nat");
+  const a = v("a");
+  const b = v("b");
+  const ih = v("ih");
+  const add = (left: Term, right: Term): Term => apps(c("add"), left, right);
+  const succ = (value: Term): Term => app(c("succ"), value);
+  const proposition = (value: Term): Term => equal(nat, add(value, b), add(b, value));
+  const motive = lambda("a", nat, proposition(v("a")));
+  // base: 0 + b = b + 0.  LHS = b (add_zero_left); RHS = b (add_zero_right).
+  const base = trans(
+    nat,
+    add(c("zero"), b),
+    b,
+    add(b, c("zero")),
+    apps(c("add_zero_left"), b),
+    symm(nat, add(b, c("zero")), b, apps(c("add_zero_right"), b)),
+  );
+  const succA = succ(a);
+  // step: S a + b = b + S a.  LHS = S(a + b) (add_succ_left), congr succ ih -> S(b + a); RHS = S(b + a) (add_succ_right b a).
+  const successorCase = lambda("a", nat, lambda("ih", proposition(a), trans(
+    nat,
+    add(succA, b),
+    succ(add(a, b)),
+    add(b, succA),
+    apps(c("add_succ_left"), a, b),
+    trans(
+      nat,
+      succ(add(a, b)),
+      succ(add(b, a)),
+      add(b, succA),
+      congr(nat, nat, c("succ"), add(a, b), add(b, a), ih),
+      symm(nat, add(b, succA), succ(add(b, a)), apps(c("add_succ_right"), b, a)),
+    ),
+  )));
+  return {
+    type: pis([["a", nat], ["b", nat]], proposition(v("a"))),
+    term: lambda("a", nat, lambda("b", nat, apps(c("nat_induction"), motive, base, successorCase, v("a")))),
+  };
+}
+
+export function lengthAppendProof(): { readonly type: Term; readonly term: Term } {
+  const list = c("List");
+  const nat = c("Nat");
+  const ys = v("ys");
+  const x = v("x");
+  const xs = v("xs");
+  const ih = v("ih");
+  const len = (value: Term): Term => app(c("length"), value);
+  const add = (left: Term, right: Term): Term => apps(c("add"), left, right);
+  const append = (left: Term, right: Term): Term => apps(c("append"), left, right);
+  const succ = (value: Term): Term => app(c("succ"), value);
+  const proposition = (value: Term): Term => equal(nat, len(append(value, ys)), add(len(value), len(ys)));
+  const motive = lambda("xs", list, proposition(v("xs")));
+  // base: length ([] ++ ys) = length [] + length ys.
+  // LHS: length([] ++ ys) = length ys (append_nil_left, congr length). RHS: length [] + length ys = 0 + length ys = length ys.
+  const base = trans(
+    nat,
+    len(append(c("nil"), ys)),
+    len(ys),
+    add(len(c("nil")), len(ys)),
+    congr(list, nat, c("length"), append(c("nil"), ys), ys, apps(c("append_nil_left"), ys)),
+    symm(
+      nat,
+      add(len(c("nil")), len(ys)),
+      len(ys),
+      trans(
+        nat,
+        add(len(c("nil")), len(ys)),
+        add(c("zero"), len(ys)),
+        len(ys),
+        congr(nat, nat, lambda("front", nat, add(v("front"), len(ys))), len(c("nil")), c("zero"), c("length_nil")),
+        apps(c("add_zero_left"), len(ys)),
+      ),
+    ),
+  );
+  const consXs = apps(c("cons"), x, xs);
+  // step. LHS: length((x::xs) ++ ys) = length(x :: (xs ++ ys)) = S(length(xs ++ ys)) = S(length xs + length ys).
+  //       RHS: length(x::xs) + length ys = S(length xs) + length ys = S(length xs + length ys).
+  const common = succ(add(len(xs), len(ys)));
+  const leftChain = trans(
+    nat,
+    len(append(consXs, ys)),
+    len(apps(c("cons"), x, append(xs, ys))),
+    common,
+    congr(list, nat, c("length"), append(consXs, ys), apps(c("cons"), x, append(xs, ys)), apps(c("append_cons_left"), x, xs, ys)),
+    trans(
+      nat,
+      len(apps(c("cons"), x, append(xs, ys))),
+      succ(len(append(xs, ys))),
+      common,
+      apps(c("length_cons"), x, append(xs, ys)),
+      congr(nat, nat, c("succ"), len(append(xs, ys)), add(len(xs), len(ys)), ih),
+    ),
+  );
+  const rhsToCommon = trans(
+    nat,
+    add(len(consXs), len(ys)),
+    add(succ(len(xs)), len(ys)),
+    common,
+    congr(nat, nat, lambda("front", nat, add(v("front"), len(ys))), len(consXs), succ(len(xs)), apps(c("length_cons"), x, xs)),
+    apps(c("add_succ_left"), len(xs), len(ys)),
+  );
+  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs),
+    trans(nat, len(append(consXs, ys)), common, add(len(consXs), len(ys)), leftChain, symm(nat, add(len(consXs), len(ys)), common, rhsToCommon)))));
+  return {
+    type: pis([["xs", list], ["ys", list]], proposition(v("xs"))),
+    term: lambda("xs", list, lambda("ys", list, apps(c("list_induction"), motive, base, step, v("xs")))),
+  };
+}
+
+export function lengthRevProof(): { readonly type: Term; readonly term: Term } {
+  const list = c("List");
+  const nat = c("Nat");
+  const x = v("x");
+  const xs = v("xs");
+  const ih = v("ih");
+  const len = (value: Term): Term => app(c("length"), value);
+  const rev = (value: Term): Term => app(c("rev"), value);
+  const add = (left: Term, right: Term): Term => apps(c("add"), left, right);
+  const append = (left: Term, right: Term): Term => apps(c("append"), left, right);
+  const succ = (value: Term): Term => app(c("succ"), value);
+  const singleton = apps(c("cons"), x, c("nil"));
+  const proposition = (value: Term): Term => equal(nat, len(rev(value)), len(value));
+  const motive = lambda("xs", list, proposition(v("xs")));
+  // base: length (rev []) = length [].  rev [] = [] so refl.
+  const base = refl(len(rev(c("nil"))));
+  const consXs = apps(c("cons"), x, xs);
+  // step. LHS: length(rev(x::xs)) = length(rev xs ++ [x]) = length(rev xs) + length [x]
+  //         = length xs + length [x] (ih) = length xs + S 0 = length xs + S(length []) ... = S(length xs).
+  //       RHS: length(x::xs) = S(length xs).
+  // Use length_append: length(rev xs ++ [x]) = length(rev xs) + length [x].
+  // length [x] = S(length []) = S 0.  add(length xs, S 0) = S(add(length xs, 0)) = S(length xs) via add_succ_right + add_zero_right.
+  const lenSingleton = succ(len(c("nil")));
+  const afterRevCons = len(append(rev(xs), singleton));
+  const afterLengthAppend = add(len(rev(xs)), len(singleton));
+  const afterIH = add(len(xs), len(singleton));
+  const target = succ(len(xs));
+  const leftChain = trans(
+    nat,
+    len(rev(consXs)),
+    afterRevCons,
+    target,
+    congr(list, nat, c("length"), rev(consXs), append(rev(xs), singleton), apps(c("rev_cons"), x, xs)),
+    trans(
+      nat,
+      afterRevCons,
+      afterLengthAppend,
+      target,
+      apps(c("length_append"), rev(xs), singleton),
+      trans(
+        nat,
+        afterLengthAppend,
+        afterIH,
+        target,
+        congr(nat, nat, lambda("front", nat, add(v("front"), len(singleton))), len(rev(xs)), len(xs), ih),
+        // add(len xs, length [x]) -> add(len xs, S 0) -> S(add(len xs, 0)) -> S(len xs)
+        trans(
+          nat,
+          afterIH,
+          add(len(xs), lenSingleton),
+          target,
+          congr(nat, nat, lambda("back", nat, add(len(xs), v("back"))), len(singleton), lenSingleton, apps(c("length_cons"), x, c("nil"))),
+          trans(
+            nat,
+            add(len(xs), lenSingleton),
+            add(len(xs), succ(c("zero"))),
+            target,
+            congr(nat, nat, lambda("back", nat, add(len(xs), v("back"))), lenSingleton, succ(c("zero")), congr(nat, nat, c("succ"), len(c("nil")), c("zero"), c("length_nil"))),
+            trans(
+              nat,
+              add(len(xs), succ(c("zero"))),
+              succ(add(len(xs), c("zero"))),
+              target,
+              apps(c("add_succ_right"), len(xs), c("zero")),
+              congr(nat, nat, c("succ"), add(len(xs), c("zero")), len(xs), apps(c("add_zero_right"), len(xs))),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs),
+    trans(nat, len(rev(consXs)), target, len(consXs), leftChain, symm(nat, len(consXs), target, apps(c("length_cons"), x, xs))))));
+  return {
+    type: pis([["xs", list]], proposition(v("xs"))),
+    term: lambda("xs", list, apps(c("list_induction"), motive, base, step, v("xs"))),
+  };
+}
+
+export function mapLengthProof(): { readonly type: Term; readonly term: Term } {
+  const list = c("List");
+  const nat = c("Nat");
+  const fnType = arrow(c("Elem"), c("Elem"));
+  const f = v("f");
+  const x = v("x");
+  const xs = v("xs");
+  const ih = v("ih");
+  const len = (value: Term): Term => app(c("length"), value);
+  const mapF = (value: Term): Term => apps(c("map"), f, value);
+  const succ = (value: Term): Term => app(c("succ"), value);
+  const proposition = (value: Term): Term => equal(nat, len(mapF(value)), len(value));
+  const motive = lambda("xs", list, proposition(v("xs")));
+  // base: length (map f []) = length [].  map f [] = [] so refl.
+  const base = refl(len(mapF(c("nil"))));
+  const consXs = apps(c("cons"), x, xs);
+  // step. LHS: length(map f (x::xs)) = length(f x :: map f xs) = S(length(map f xs)) = S(length xs) (ih).
+  //       RHS: length(x::xs) = S(length xs).
+  const target = succ(len(xs));
+  const mappedCons = apps(c("cons"), app(f, x), mapF(xs));
+  const leftChain = trans(
+    nat,
+    len(mapF(consXs)),
+    len(mappedCons),
+    target,
+    congr(list, nat, c("length"), mapF(consXs), mappedCons, apps(c("map_cons"), f, x, xs)),
+    trans(
+      nat,
+      len(mappedCons),
+      succ(len(mapF(xs))),
+      target,
+      apps(c("length_cons"), app(f, x), mapF(xs)),
+      congr(nat, nat, c("succ"), len(mapF(xs)), len(xs), ih),
+    ),
+  );
+  const step = lambda("x", c("Elem"), lambda("xs", list, lambda("ih", proposition(xs),
+    trans(nat, len(mapF(consXs)), target, len(consXs), leftChain, symm(nat, len(consXs), target, apps(c("length_cons"), x, xs))))));
+  return {
+    type: pis([["f", fnType], ["xs", list]], proposition(v("xs"))),
+    term: lambda("f", fnType, lambda("xs", list, apps(c("list_induction"), motive, base, step, v("xs")))),
   };
 }
 
@@ -624,6 +971,12 @@ export function verifyLessonProof(lessonId: string): void {
     "list-rev-append": revAppendProof,
     "list-rev-involution": revInvolutionProof,
     "map-composition": mapCompositionProof,
+    "nat-add-succ-right": addSuccRightProof,
+    "nat-add-assoc": addAssocProof,
+    "nat-add-comm": addCommProof,
+    "list-length-append": lengthAppendProof,
+    "list-length-rev": lengthRevProof,
+    "list-map-length": mapLengthProof,
   };
   const build = builders[lessonId];
   if (build === undefined) throw new Error(`no kernel certificate for lesson ${lessonId}`);

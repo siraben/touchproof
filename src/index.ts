@@ -37,6 +37,12 @@ export {
   revAppendProof,
   revInvolutionProof,
   addZeroRightProof,
+  addSuccRightProof,
+  addAssocProof,
+  addCommProof,
+  lengthAppendProof,
+  lengthRevProof,
+  mapLengthProof,
   appendNilRightProof,
   verifyLessonProof,
 } from "./proof/standardLibrary.js";

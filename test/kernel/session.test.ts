@@ -85,12 +85,19 @@ describe("visual proof session", () => {
     ["list-map-append", "induction:xs"],
     ["list-rev-append", "induction:xs"],
     ["list-rev-involution", "induction:xs"],
+    ["nat-add-succ-right", "induction:n"],
+    ["nat-add-assoc", "induction:a"],
+    ["nat-add-comm", "induction:a"],
+    ["list-length-append", "induction:xs"],
+    ["list-length-rev", "induction:xs"],
+    ["list-map-length", "induction:xs"],
   ])("completes the %s curriculum lesson", (lessonId, analysisMove) => {
     let session = createLessonSession(lessonId);
     session = applyProofMove(session, analysisMove);
     while (session.goals.some((goal) => goal.status === "open")) session = reduceUntilReflexive(session);
     expect(session.goals.every((goal) => goal.status === "solved")).toBe(true);
     expect(session.kernelStatus).toBe("pending");
+    expect(checkProofSession(session).theoremTerm).toBeDefined();
   });
 
   it.each(["bool-compute", "nat-add-example"])("completes the %s computation lesson", (lessonId) => {

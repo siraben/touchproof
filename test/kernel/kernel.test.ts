@@ -2,12 +2,18 @@ import { describe, expect, it } from "vitest";
 import { assertAxiomFree, check, checkDeclaration, declareAxiom, declareInductive, declareParameterizedInductive, definitionallyEqual, emptyEnvironment, environmentAxioms, infer, KernelError, normalize } from "../../src/kernel/checker.js";
 import { app, apps, constant, equal, lambda, letIn, pi, recursor, refl, subst, type, variable } from "../../src/kernel/term.js";
 import {
+  addAssocProof,
+  addCommProof,
+  addSuccRightProof,
   addZeroRightProof,
   appendNilRightProof,
   booleanComputationProof,
   booleanInvolutionProof,
+  lengthAppendProof,
+  lengthRevProof,
   mapCompositionProof,
   mapAppendProof,
+  mapLengthProof,
   natAdditionExampleProof,
   revAppendProof,
   revInvolutionProof,
@@ -152,6 +158,12 @@ describe("dependent kernel", () => {
     ["list-map-append", mapAppendProof],
     ["list-rev-append", revAppendProof],
     ["list-rev-involution", revInvolutionProof],
+    ["nat-add-succ-right", addSuccRightProof],
+    ["nat-add-assoc", addAssocProof],
+    ["nat-add-comm", addCommProof],
+    ["list-length-append", lengthAppendProof],
+    ["list-length-rev", lengthRevProof],
+    ["list-map-length", mapLengthProof],
   ] as const)("checks the %s curriculum certificate", (lessonId, build) => {
     const theorem = build();
     expect(() => check(theorem.term, theorem.type, new Map(), touchProofEnvironment())).not.toThrow();

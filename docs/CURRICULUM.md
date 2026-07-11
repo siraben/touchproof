@@ -17,6 +17,12 @@ pedagogical ordering and exercise inspiration.
 | 8 | `rev (rev xs) = xs` | Reusing the previously proved reverse/append theorem | [Lists](https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html) |
 | 9 | `revAcc xs acc = rev xs ++ acc` | Generalizing an accumulator before induction | [Induction](https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html) |
 | 10 | `map (f ∘ g) xs = map f (map g xs)` | Higher-order functions and local rewriting | [Poly](https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html) |
+| 11 | `n + S m = S (n + m)` | Induction on the left argument | [Induction](https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html) |
+| 12 | `(a + b) + c = a + (b + c)` | Nested data reached by a single induction | [Induction](https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html) |
+| 13 | `a + b = b + a` | Composing two proved lemmas per branch | [Induction](https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html) |
+| 14 | `length (xs ++ ys) = length xs + length ys` | A list measure meeting addition | [Lists](https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html) |
+| 15 | `length (rev xs) = length xs` | Reusing a measure lemma and an arithmetic bridge | [Lists](https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html) |
+| 16 | `length (map f xs) = length xs` | Higher-order functions preserve a measure | [Poly](https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html) |
 
 The important transition is visible in the interface: concrete values reduce;
 unknown finite values require cases; unknown recursive values require

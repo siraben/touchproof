@@ -23,6 +23,10 @@ const lemmaNames: Readonly<Record<string, string>> = {
   append_nil: "append_nil_right",
   append_assoc: "append_assoc",
   rev_append: "rev_append",
+  add_zero_right: "add_zero_right",
+  add_succ_right: "add_succ_right",
+  add_one_right: "add_one_right",
+  length_append: "length_append",
 };
 
 function valueType(source: string): Term {
@@ -113,6 +117,25 @@ function hypothesisProof(hypothesis: Hypothesis): Term {
     const appended = hypothesis.left.args[0];
     if (appended?.kind === "call") {
       return apps(constant("rev_append"), expressionTerm(appended.args[0]!), expressionTerm(appended.args[1]!));
+    }
+  }
+  // add_zero_right (n)     from  add(n, zero) = n
+  // add_one_right (n)      from  add(n, succ(zero)) = succ(n)
+  if ((hypothesis.name === "add_zero_right" || hypothesis.name === "add_one_right") && hypothesis.left.kind === "call") {
+    return app(constant(hypothesis.name), expressionTerm(hypothesis.left.args[0]!));
+  }
+  // add_succ_right (m) (n)  from  add(m, succ(n)) = succ(add(m, n))
+  if (hypothesis.name === "add_succ_right" && hypothesis.left.kind === "call") {
+    const successor = hypothesis.left.args[1];
+    if (successor?.kind === "ctor") {
+      return apps(constant("add_succ_right"), expressionTerm(hypothesis.left.args[0]!), expressionTerm(successor.args[0]!));
+    }
+  }
+  // length_append (as) (bs)  from  length(append(as, bs)) = add(length(as), length(bs))
+  if (hypothesis.name === "length_append" && hypothesis.left.kind === "call") {
+    const appended = hypothesis.left.args[0];
+    if (appended?.kind === "call") {
+      return apps(constant("length_append"), expressionTerm(appended.args[0]!), expressionTerm(appended.args[1]!));
     }
   }
   return constant(lemmaNames[hypothesis.name] ?? hypothesis.name);
