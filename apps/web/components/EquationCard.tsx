@@ -81,26 +81,29 @@ export function PropositionCard({
     <div className={`equation-card proposition-card ${busy ? "busy" : ""}`} onClick={(event) => event.stopPropagation()}>
       <Expression expression={proposition} moves={moves} onMove={onMove} />
       {/* The close affordance for a proposition is `exact`: fill the goal with a
-          matching hypothesis. It closes on click and accepts the same handle
-          drop (hypothesis id) that the goal proposition itself accepts. */}
-      <button
-        className={`equals qed-check ${closeMove === undefined ? "" : "closable"}`}
-        disabled={closeMove === undefined || busy}
-        title={closeMove === undefined ? "Introduce and use assumptions until one proves this goal" : "Close: this goal is exactly one of your assumptions"}
-        onClick={() => closeMove !== undefined && onMove(closeMove.id)}
-        onDragOver={(event) => {
-          if (closeMove === undefined) return;
-          const types = Array.from(event.dataTransfer.types);
-          if (types.includes("application/x-touchproof-handle")) event.preventDefault();
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const handle = event.dataTransfer.getData("application/x-touchproof-handle");
-          const move = moves.find((candidate) => candidate.kind === "exact" && candidate.handle === handle);
-          if (move !== undefined) onMove(move.id);
-        }}
-      >✓</button>
+          matching hypothesis. Unlike `=` (part of the statement itself), the ✓
+          is pure affordance, so it only appears once an exact move exists. It
+          closes on click and accepts the same handle drop (hypothesis id) that
+          the goal proposition itself accepts. */}
+      {closeMove !== undefined && (
+        <button
+          className="equals qed-check closable"
+          disabled={busy}
+          title="Close: this goal is exactly one of your assumptions"
+          onClick={() => onMove(closeMove.id)}
+          onDragOver={(event) => {
+            const types = Array.from(event.dataTransfer.types);
+            if (types.includes("application/x-touchproof-handle")) event.preventDefault();
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const handle = event.dataTransfer.getData("application/x-touchproof-handle");
+            const move = moves.find((candidate) => candidate.kind === "exact" && candidate.handle === handle);
+            if (move !== undefined) onMove(move.id);
+          }}
+        >✓</button>
+      )}
       {solved && (
         <div className="qed-stamp" aria-hidden="true">Q.E.D.</div>
       )}
