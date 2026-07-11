@@ -32,12 +32,18 @@
   --vellum-edge: #d8cdaf;
   --ink: #22302c;              /* text on vellum */
   --ink-muted: #5d6b66;
+  /* Ink-on-vellum syntax + expression glyph palette (shared by .operator/
+     .function-name and the .tok-* highlighter so the same token kind is one
+     colour on every vellum surface). */
+  --ink-operator: #5f5a4a;     /* operator + paren glyphs */
+  --ink-fn: #1f4e46;           /* function / definition names */
 
   /* Heritage mint, tuned to the new palette (hypothesis cards) */
   --mint: #cdeedd;
   --mint-line: #8ec7ab;
   --green: #176b4d;
   --green-glow: #4ade80;
+  --green-on-dark: #7ee2a8;    /* legible green on navy: kernel status, dark tok-fn */
 
   /* Stamps and lamps */
   --stamp: #c3391f;            /* vermilion ink */
@@ -67,8 +73,24 @@
   --radius-card: 13px;    /* floating canvas + hypothesis cards */
   --radius-sheet: 16px;   /* the hero equation sheet + scope boxes */
   --radius-popover: 15px; /* context menu, notebook/source cells */
-  --radius-chip: 12px;    /* move-palette chips, the view switch */
+  --radius-chip: 12px;    /* move-palette chips + the view-switch container */
+  --radius-control: 10px; /* medium controls: menu rows, history buttons, tabs */
+  --radius-input: 8px;    /* small controls: header buttons, code chips, badges */
   --radius-pill: 999px;
+
+  /* Uppercase small-caps tracking — a deliberate 2-rung scale replacing the
+     ad-hoc .08/.1/.14/.16em spread. Wide accents the engineering eyebrows;
+     the default tracks every other tiny-caps micro-label. */
+  --track-caps: .1em;       /* case labels, menu/script/scope captions */
+  --track-caps-wide: .14em; /* eyebrows, procedure note, progress, path heading */
+
+  /* Font-weight ladder (documented):
+       400  body / muted text
+       600  in-body emphasis (kernel status, progress count, mono fn, scope var)
+       650  h1 display only (optical weight for Bricolage at large size)
+       700  UI labels and every uppercase small-caps micro-label
+       800  reserved for stamped / filled accents (Q.E.D., hypothesis badge) */
+  --weight-label: 700;
 
   /* Two-layer vellum shadows: crisp top edge light, deep soft drop below */
   --shadow-card: inset 0 1px 0 rgba(255, 255, 255, .55), 0 1px 2px rgba(4, 10, 18, .5), 0 12px 28px rgba(4, 10, 18, .38);
@@ -82,7 +104,10 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; color: var(--text); background: var(--board-deep); font-family: var(--sans); }
+/* --fs-base is the documented default body rung; set it on <body> so controls
+   that inherit (view switch, obligation tabs) sit on the scale instead of the
+   browser's 16px. Elements that want a larger rung pin it explicitly. */
+body { margin: 0; color: var(--text); background: var(--board-deep); font-family: var(--sans); font-size: var(--fs-base); }
 button { font: inherit; }
 :focus-visible { outline: 2px solid var(--cyan-strong); outline-offset: 2px; }
 /* On vellum surfaces the focus ring switches to the darker cyan ink */
@@ -96,40 +121,44 @@ button { font: inherit; }
 
 /* --- Topbar ---------------------------------------------------------------- */
 .topbar { height: 72px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 32px; background: rgba(10, 18, 32, .92); border-bottom: 1px solid var(--hairline); position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.02em; }
-.brand small { color: var(--muted); font-weight: 400; letter-spacing: 0; margin-left: 6px; }
-.brand-mark { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px 10px 10px 3px; background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--board-deep); border: 1px solid var(--vellum-edge); font-family: var(--serif-math); font-style: italic; box-shadow: 0 2px 8px rgba(3, 8, 16, .5); }
+.brand { display: flex; align-items: center; gap: 10px; font-size: var(--fs-md); font-weight: 700; letter-spacing: -.02em; }
+.brand small { color: var(--muted); font-size: var(--fs-sm); font-weight: 400; letter-spacing: 0; margin-left: 6px; }
+.brand-mark { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px 10px 10px 3px; background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--board-deep); border: 1px solid var(--vellum-edge); font: italic var(--fs-lg) var(--serif-math); box-shadow: 0 2px 8px rgba(3, 8, 16, .5); }
 .view-switch { display: flex; padding: 4px; border-radius: var(--radius-chip); background: rgba(125, 211, 252, .08); border: 1px solid var(--hairline); }
-.view-switch button { border: 0; padding: 7px 18px; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; }
+.view-switch button { border: 0; padding: 7px 18px; border-radius: var(--radius-input); background: transparent; color: var(--muted); cursor: pointer; transition: color .16s, background .16s; }
+.view-switch button:not(.active):hover { color: var(--text); background: rgba(125, 211, 252, .08); }
 .view-switch button.active { background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--ink); box-shadow: 0 2px 8px rgba(3, 8, 16, .4); }
 .kernel-badge { justify-self: end; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--fs-base); }
 /* Indicator lamp: brass while armed… */
 .kernel-badge span { width: 8px; height: 8px; border-radius: 50%; background: var(--brass); box-shadow: 0 0 0 3px rgba(217, 164, 65, .15), 0 0 10px rgba(217, 164, 65, .6); }
 /* …green glow once the kernel has checked this proof */
-.kernel-badge.checked { color: #7ee2a8; font-weight: 600; }
+.kernel-badge.checked { color: var(--green-on-dark); font-weight: 600; }
 .kernel-badge.checked span { background: var(--green-glow); box-shadow: 0 0 0 3px rgba(74, 222, 128, .15), 0 0 12px rgba(74, 222, 128, .65); }
 .header-actions { justify-self: end; display: flex; align-items: center; gap: 7px; }
 .header-actions > button { border: 0; background: transparent; color: var(--muted); font-size: var(--fs-sm); cursor: pointer; padding: 6px; }
 .header-actions > button:hover { color: var(--cyan); }
 .header-actions > button:disabled { opacity: .3; cursor: default; }
-.header-actions > .history-button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1px solid var(--hairline); border-radius: 8px; background: rgba(125, 211, 252, .06); color: var(--text); font-size: var(--fs-lg); }
+.header-actions > .history-button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1px solid var(--hairline); border-radius: var(--radius-input); background: rgba(125, 211, 252, .06); color: var(--text); font-size: var(--fs-lg); transition: color .16s, border-color .16s; }
+.header-actions > .history-button:not(:disabled):hover { color: var(--cyan); border-color: rgba(125, 211, 252, .35); }
 
 /* --- Lesson strip as an engineering title block ----------------------------- */
 .lesson-strip { display: grid; grid-template-columns: 1.3fr 1fr auto; gap: 40px; align-items: end; padding: 26px 40px 22px; border-bottom: 1px solid var(--hairline); background: #0e1a2b; }
-.eyebrow { color: var(--cyan); text-transform: uppercase; letter-spacing: .14em; font-size: var(--fs-xs); font-weight: 700; }
+.eyebrow { color: var(--cyan); text-transform: uppercase; letter-spacing: var(--track-caps-wide); font-size: var(--fs-xs); font-weight: var(--weight-label); }
 h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -.03em; color: var(--text); }
-.lesson-strip p { color: var(--muted); line-height: 1.55; margin: 0; max-width: 520px; border-left: 1px solid var(--hairline); padding-left: 28px; }
-.lesson-strip p::before { content: "Procedure"; display: block; margin-bottom: 4px; color: rgba(125, 211, 252, .75); font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .14em; }
+.lesson-strip p { color: var(--muted); font-size: var(--fs-md); line-height: 1.55; margin: 0; max-width: 520px; border-left: 1px solid var(--hairline); padding-left: 28px; }
+.lesson-strip p::before { content: "Procedure"; display: block; margin-bottom: 4px; color: rgba(125, 211, 252, .75); font-size: var(--fs-2xs); font-weight: var(--weight-label); text-transform: uppercase; letter-spacing: var(--track-caps-wide); }
 .progress { display: flex; align-items: baseline; gap: 7px; border-left: 1px solid var(--hairline); padding-left: 28px; }
 .progress strong { font: 600 var(--fs-xl) var(--sans); color: var(--text); font-variant-numeric: tabular-nums; }
-.progress span { color: var(--muted); font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .14em; }
+.progress span { color: var(--muted); font-size: var(--fs-2xs); font-weight: var(--weight-label); text-transform: uppercase; letter-spacing: var(--track-caps-wide); }
 
 /* --- Body grid & clipboard sidebar ------------------------------------------ */
 .body-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 215px minmax(0, 1fr); }
 .context-panel { padding: 20px 14px; border-right: 1px solid var(--hairline); background: var(--clipboard); overflow: auto; }
-.context-panel h2 { margin: 0 0 14px; font: 700 var(--fs-2xs) var(--sans); text-transform: uppercase; letter-spacing: .16em; color: var(--muted); }
+.context-panel h2 { margin: 0 0 14px; font: var(--weight-label) var(--fs-2xs) var(--sans); text-transform: uppercase; letter-spacing: var(--track-caps-wide); color: var(--muted); }
 .lesson-list { display: grid; gap: 6px; margin: 0 0 26px; }
-.lesson-list button { display: flex; gap: 9px; align-items: center; padding: 8px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--muted); text-align: left; cursor: pointer; }
+.lesson-list button { display: flex; gap: 9px; align-items: center; padding: 8px; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--muted); text-align: left; cursor: pointer; transition: color .16s, background .16s, border-color .16s; }
+.lesson-list button:not(.active):not(:disabled):hover { border-color: var(--hairline); background: rgba(125, 211, 252, .05); color: var(--text); }
+.lesson-list button:disabled { cursor: default; }
 .lesson-list button > span { display: grid; place-items: center; flex: 0 0 25px; height: 25px; border-radius: 50%; background: rgba(125, 211, 252, .1); font-size: var(--fs-xs); }
 .lesson-list button strong, .lesson-list button small { display: block; }
 .lesson-list button strong { color: inherit; font-size: var(--fs-sm); }
@@ -164,8 +193,9 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   background-attachment: scroll, local, local, local, local;
 }
 .obligation-tabs { display: flex; justify-content: center; gap: 8px; margin-bottom: 48px; }
-.obligation-tabs button { border: 1px solid var(--hairline); border-radius: var(--radius-pill); padding: 7px 13px 7px 8px; background: rgba(21, 36, 56, .85); color: var(--muted); cursor: pointer; }
-.obligation-tabs button span { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 7px; border-radius: 50%; background: rgba(125, 211, 252, .12); }
+.obligation-tabs button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--hairline); border-radius: var(--radius-pill); padding: 7px 13px 7px 8px; background: rgba(21, 36, 56, .85); color: var(--muted); font-size: var(--fs-base); cursor: pointer; transition: color .16s, border-color .16s, background .16s; }
+.obligation-tabs button:not(.active):hover { color: var(--text); border-color: rgba(125, 211, 252, .3); }
+.obligation-tabs button span { display: inline-grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; background: rgba(125, 211, 252, .12); }
 .obligation-tabs button.active { border-color: var(--vellum-edge); background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--ink); box-shadow: 0 4px 16px rgba(3, 8, 16, .45); }
 .obligation-tabs button.active span { background: rgba(11, 110, 151, .12); color: var(--cyan-ink); }
 /* Completion moment: the ✓ becomes a small rotated stamp */
@@ -220,7 +250,7 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   max-width: clamp(340px, calc(100cqw - 2 * var(--rail) - 56px), 1000px);
 }
 .scope-box .equation-card { max-width: 100%; }
-.case-label { color: var(--muted); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .14em; font-weight: 700; }
+.case-label { color: var(--muted); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: var(--track-caps); font-weight: var(--weight-label); }
 
 /* --- The hero sheet: equation card -------------------------------------------
    Min-height, padding and font all read from the --eq-* knobs so tight mode can
@@ -233,7 +263,9 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .equation-card::after { right: 9px; bottom: 9px; border-right: 1px solid #8a7f63; border-bottom: 1px solid #8a7f63; }
 /* Last-resort equation break: the = drops together with the RHS. */
 .equation-rhs { display: inline-flex; align-items: center; gap: 28px; max-width: 100%; min-width: 0; }
-.equals { border: 0; padding: 3px 8px 7px; border-radius: 10px; background: transparent; color: var(--stamp); font: inherit; font-style: normal; font-size: 1.2em; cursor: default; transition: .16s; }
+/* Flex centres the row; symmetric padding keeps the vermilion = optically on
+   the terms' midline (the earlier 3/7 split rode it high). */
+.equals { border: 0; padding: 5px 8px; border-radius: var(--radius-control); background: transparent; color: var(--stamp); font: inherit; font-style: normal; font-size: 1.2em; line-height: 1; cursor: default; transition: .16s; }
 .equals.closable { cursor: pointer; background: #f6ddd2; box-shadow: 0 0 0 5px #f9e9e0; animation: reflexivity-pulse 1.8s ease-in-out infinite; }
 .equals.closable:hover { transform: scale(1.08); background: var(--stamp); color: var(--vellum-hi); }
 @keyframes reflexivity-pulse { 50% { box-shadow: 0 0 0 9px rgba(195, 57, 31, .1); } }
@@ -261,18 +293,18 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 @keyframes tap-pulse { 50% { border-bottom-color: rgba(11, 110, 151, .35); } }
 /* Mathematical typesetting: variables italic (inherited from the sheet),
    operator glyphs and defined function names upright */
-.operator, .paren { color: #5f5a4a; font-style: normal; }
-.function-name { font-style: normal; color: #1f4e46; }
+.operator, .paren { color: var(--ink-operator); font-style: normal; }
+.function-name { font-style: normal; color: var(--ink-fn); }
 .argument { margin-left: .24em; }
 .gesture-hint { display: inline-flex; gap: 10px; align-items: center; color: var(--muted); font-size: var(--fs-base); }
-.cursor-icon { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: rgba(125, 211, 252, .14); border: 1px solid var(--hairline); color: var(--cyan); }
+.cursor-icon { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-input); background: rgba(125, 211, 252, .14); border: 1px solid var(--hairline); color: var(--cyan); }
 
 /* --- Context menu (vellum popover) --------------------------------------------- */
 .context-menu { position: fixed; z-index: 50; width: min(390px, 92vw); transform: translate(10px, 10px); padding: 8px; border: 1px solid var(--vellum-edge); border-radius: var(--radius-popover); background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); box-shadow: var(--shadow); text-align: left; color: var(--ink); animation: menu-in .12s ease both; }
 .context-menu::before { content: ""; position: absolute; left: 12px; top: -7px; width: 12px; height: 12px; transform: rotate(45deg); border-left: 1px solid var(--vellum-edge); border-top: 1px solid var(--vellum-edge); background: var(--vellum-hi); }
 @keyframes menu-in { from { opacity: 0; } to { opacity: 1; } }
-.context-menu-title { padding: 6px 9px 8px; color: var(--ink-muted); font-size: var(--fs-2xs); font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
-.context-menu button { width: 100%; display: flex; gap: 11px; align-items: flex-start; padding: 10px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.context-menu-title { padding: 6px 9px 8px; color: var(--ink-muted); font-size: var(--fs-2xs); font-weight: var(--weight-label); text-transform: uppercase; letter-spacing: var(--track-caps); }
+.context-menu button { width: 100%; display: flex; gap: 11px; align-items: flex-start; padding: 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .context-menu button:hover, .context-menu button:focus-visible { outline: none; background: var(--cyan-wash); }
 .context-menu button > span { color: var(--cyan-ink); font-size: var(--fs-lg); }
 .context-menu strong, .context-menu small { display: block; }
@@ -305,7 +337,7 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .move-tip {
   position: absolute; left: 50%; bottom: calc(100% + 9px); z-index: 60;
   width: max-content; max-width: 260px; transform: translateX(-50%);
-  padding: 8px 11px; border: 1px solid var(--vellum-edge); border-radius: 10px;
+  padding: 8px 11px; border: 1px solid var(--vellum-edge); border-radius: var(--radius-control);
   background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo));
   box-shadow: var(--shadow); color: var(--ink-muted);
   font-size: var(--fs-sm); font-weight: 400; line-height: 1.4; text-align: left;
@@ -322,7 +354,7 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 
 /* --- Vellum canvas cards --------------------------------------------------------- */
 .canvas-card { position: absolute; z-index: 3; width: var(--ctx-card-w, 250px); border: 1px solid var(--vellum-edge); border-radius: var(--radius-card); background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); box-shadow: var(--shadow-card); text-align: left; overflow: hidden; color: var(--ink); }
-.canvas-card-handle { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-bottom: 1px solid #ded3b6; background: linear-gradient(180deg, #f3ecd9, #ece2ca); color: #5d5744; font-size: var(--fs-xs); font-weight: 800; cursor: grab; touch-action: none; user-select: none; }
+.canvas-card-handle { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-bottom: 1px solid #ded3b6; background: linear-gradient(180deg, #f3ecd9, #ece2ca); color: #5d5744; font-size: var(--fs-xs); font-weight: var(--weight-label); cursor: grab; touch-action: none; user-select: none; }
 .canvas-card-handle:active { cursor: grabbing; background: #e8ddc2; }
 .canvas-card-handle > span { color: var(--cyan-ink); font-size: var(--fs-md); }
 .canvas-card-body { padding: 11px; }
@@ -334,18 +366,20 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .definition-canvas-card small, .context-canvas-card small { display: block; margin-top: 8px; color: var(--ink-muted); font-size: var(--fs-2xs); line-height: 1.4; }
 /* Collapsible header: name/type-signature title truncates, chevron toggles. */
 .definition-card-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.definition-card-toggle { flex: 0 0 auto; margin-left: auto; border: 0; padding: 0 2px; background: transparent; color: var(--cyan-ink); font-size: var(--fs-sm); line-height: 1; cursor: pointer; }
+.definition-card-toggle { flex: 0 0 auto; margin-left: auto; border: 0; padding: 0 2px; background: transparent; color: var(--cyan-ink); font-size: var(--fs-sm); line-height: 1; cursor: pointer; opacity: .8; transition: opacity .16s; }
+.definition-card-toggle:hover { opacity: 1; }
 /* Roomy mode: cards are always expanded, so the chevron is decorative-only and
    hidden; the body always shows. Tight mode (@container) reveals the chevron
    and collapses .is-collapsed bodies to the header alone. */
 .definition-canvas-card .definition-card-toggle { display: none; }
 .context-list { display: grid; gap: 7px; }
-.context-list code { padding: 8px 10px; border-radius: 8px; background: rgba(34, 48, 44, .07); font: var(--fs-base) var(--mono); }
-.hypothesis-card { margin-top: 20px; padding: 14px; border: 1px solid var(--mint-line); border-radius: var(--radius-card); background: var(--mint); cursor: grab; box-shadow: 0 5px 18px rgba(23, 107, 77, .14); }
-.hypothesis-card > span { display: inline-block; padding: 2px 7px; border-radius: 5px; background: var(--green); color: white; font-size: var(--fs-xs); font-weight: 800; }
+.context-list code { padding: 8px 10px; border-radius: var(--radius-input); background: rgba(34, 48, 44, .07); font: var(--fs-base) var(--mono); }
+.hypothesis-card { margin-top: 20px; padding: 14px; border: 1px solid var(--mint-line); border-radius: var(--radius-card); background: var(--mint); cursor: grab; box-shadow: 0 5px 18px rgba(23, 107, 77, .14); transition: border-color .16s, box-shadow .16s; }
+.hypothesis-card.tappable:hover { border-color: var(--green); box-shadow: 0 6px 20px rgba(23, 107, 77, .22); }
+.hypothesis-card > span { display: inline-block; padding: 2px 7px; border-radius: var(--radius-input); background: var(--green); color: white; font-size: var(--fs-xs); font-weight: 800; }
 .hypothesis-card div { margin: 10px 0 8px; font: italic var(--fs-base)/1.5 var(--serif-math); }
 .hypothesis-card small { color: var(--green); }
-.induction-zone { margin-top: 20px; min-height: 105px; display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 15px; border: 2px dashed #a89e83; border-radius: 14px; color: var(--ink-muted); transition: .2s; }
+.induction-zone { margin-top: 20px; min-height: 105px; display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 15px; border: 2px dashed #a89e83; border-radius: var(--radius-card); color: var(--ink-muted); transition: .2s; }
 .induction-zone:hover { border-color: var(--cyan-ink); background: rgba(11, 110, 151, .07); }
 .induction-zone strong { color: var(--ink); }
 .induction-zone span { font-size: var(--fs-base); line-height: 1.45; }
@@ -354,13 +388,13 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .scope-box { position: relative; margin: 14px 0; padding: 28px 14px 14px; border: 1px solid rgba(125, 211, 252, .3); border-radius: var(--radius-sheet); background: rgba(125, 211, 252, .05); box-shadow: inset 3px 0 0 rgba(125, 211, 252, .28); }
 .scope-box .scope-box { margin: 8px 0 0; }
 .scope-label { position: absolute; top: 7px; left: 12px; display: flex; align-items: baseline; gap: 7px; color: #8fc7e8; font: 700 var(--fs-sm)/1.2 var(--mono); }
-.scope-label span { color: var(--muted); font: 600 var(--fs-2xs)/1.2 var(--sans); text-transform: uppercase; letter-spacing: .08em; }
+.scope-label span { color: var(--muted); font: 600 var(--fs-2xs)/1.2 var(--sans); text-transform: uppercase; letter-spacing: var(--track-caps); }
 /* Inside vellum notebook cells the annotation switches to cyan ink */
 .proof-cell .scope-box { border-color: rgba(11, 110, 151, .3); background: rgba(11, 110, 151, .05); box-shadow: inset 3px 0 0 rgba(11, 110, 151, .25); }
 .proof-cell .scope-label { color: var(--cyan-ink); }
 .proof-cell .scope-label span { color: var(--ink-muted); }
 
-.canvas-help { position: absolute; left: 22px; bottom: 18px; z-index: 2; display: flex; flex-direction: column; gap: 3px; max-width: 310px; padding: 9px 12px; border: 1px solid var(--hairline); border-radius: 10px; background: rgba(13, 24, 40, .85); color: #b7cde2; text-align: left; font-size: var(--fs-xs); }
+.canvas-help { position: absolute; left: 22px; bottom: 18px; z-index: 2; display: flex; flex-direction: column; gap: 3px; max-width: 310px; padding: 9px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-control); background: rgba(13, 24, 40, .85); color: #b7cde2; text-align: left; font-size: var(--fs-xs); }
 .canvas-help strong { color: var(--cyan); }
 
 /* --- Lesson-load reveal -------------------------------------------------------------
@@ -396,7 +430,7 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .proof-cell { margin-top: 14px; overflow: hidden; }
 .proof-cell header { padding: 12px 17px; border-bottom: 1px solid #e2d9c0; font-weight: 700; }
 .proof-cell header span { color: var(--green); margin-right: 8px; }
-.notebook-ih { margin: 14px 18px 0; padding: 9px 11px; border-radius: 8px; background: var(--mint); color: var(--green); font: var(--fs-sm) var(--mono); }
+.notebook-ih { margin: 14px 18px 0; padding: 9px 11px; border-radius: var(--radius-input); background: var(--mint); color: var(--green); font: var(--fs-sm) var(--mono); }
 .notebook-step { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: baseline; padding: 12px 18px; border-bottom: 1px solid #e8dfc7; }
 .notebook-step:last-child { border-bottom: 0; }
 .notebook-step code { font: italic var(--fs-md)/1.5 var(--serif-math); }
@@ -404,7 +438,7 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 
 /* --- Script view ------------------------------------------------------------------------ */
 .script-view { max-width: 900px; margin: 8px auto 60px; text-align: left; }
-.script-caption { display: inline-block; padding: 5px 9px; border-radius: 8px 8px 0 0; background: #10293d; border: 1px solid var(--hairline); border-bottom: 0; color: var(--cyan); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .1em; }
+.script-caption { display: inline-block; padding: 5px 9px; border-radius: var(--radius-input) var(--radius-input) 0 0; background: #10293d; border: 1px solid var(--hairline); border-bottom: 0; color: var(--cyan); font-size: var(--fs-2xs); font-weight: var(--weight-label); text-transform: uppercase; letter-spacing: var(--track-caps); }
 .script-view pre { margin: 0; padding: 24px; overflow: auto; border: 1px solid var(--hairline); border-radius: 0 14px 14px 14px; background: #0d1826; color: #dbe9f4; box-shadow: var(--shadow); font: var(--fs-base)/1.65 var(--mono); }
 .script-view p { color: var(--muted); font-size: var(--fs-xs); }
 
@@ -413,25 +447,25 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
 .checking-toast { position: fixed; right: 24px; bottom: 24px; z-index: 80; padding: 13px 17px; border: 1px solid var(--mint-line); border-radius: 11px; background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--green); box-shadow: var(--shadow); font-size: var(--fs-base); font-weight: 700; }
 .loading { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); background: var(--board-deep); }
 .loading p { max-width: 580px; text-align: center; line-height: 1.55; }
-.loading button { border: 1px solid var(--hairline); border-radius: 9px; padding: 9px 16px; background: var(--board-raised); color: var(--text); cursor: pointer; }
+.loading button { border: 1px solid var(--hairline); border-radius: var(--radius-input); padding: 9px 16px; background: var(--board-raised); color: var(--text); cursor: pointer; }
 
 /* --- Syntax highlighting ---------------------------------------------------------------------
    Ink-on-vellum token palette (definition cards, notebook source cell); all
    colors clear 4.5:1 on the vellum gradient. */
 .tok-keyword { color: #a02c15; font-weight: 700; }
 .tok-type { color: #3f5573; }
-.tok-ctor, .tok-number { color: #0b6e97; }
-.tok-fn { color: #1f4e46; font-weight: 600; }
-.tok-operator, .tok-paren { color: #5f5a4a; }
+.tok-ctor, .tok-number { color: var(--cyan-ink); }
+.tok-fn { color: var(--ink-fn); font-weight: 600; }
+.tok-operator, .tok-paren { color: var(--ink-operator); }
 /* Dark-surface variant on the script view's ink pre */
 .script-view pre .tok-keyword { color: #ff8f76; }
 .script-view pre .tok-type { color: #e2c07a; }
-.script-view pre .tok-ctor, .script-view pre .tok-number { color: #7dd3fc; }
-.script-view pre .tok-fn { color: #7ee2a8; }
+.script-view pre .tok-ctor, .script-view pre .tok-number { color: var(--cyan); }
+.script-view pre .tok-fn { color: var(--green-on-dark); }
 .script-view pre .tok-operator, .script-view pre .tok-paren { color: #8ba3bd; }
 
 /* --- Header reset confirmation ----------------------------------------------------------------- */
-.header-actions > button.confirm-reset { padding: 6px 10px; border-radius: 8px; background: rgba(195, 57, 31, .28); color: #ffb4a1; font-weight: 700; }
+.header-actions > button.confirm-reset { padding: 6px 10px; border-radius: var(--radius-input); background: rgba(195, 57, 31, .28); color: #ffb4a1; font-weight: 700; }
 .header-actions > button.confirm-reset:hover { color: #ffcabb; }
 
 /* --- Lesson completion -------------------------------------------------------------------------
@@ -582,7 +616,7 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   .header-actions { gap: 4px; }
   /* Real small labeled buttons, wrapped in --fs-2xs, instead of unlabeled dots. */
   .header-actions > button:not(.history-button) {
-    font-size: var(--fs-2xs); width: auto; height: auto; padding: 5px 7px; border-radius: 7px;
+    font-size: var(--fs-2xs); width: auto; height: auto; padding: 5px 7px; border-radius: var(--radius-input);
     border: 1px solid var(--hairline); background: rgba(125, 211, 252, .06); color: var(--text);
   }
   .header-actions > button:not(.history-button):disabled { opacity: .35; }
