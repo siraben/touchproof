@@ -47,7 +47,7 @@ export function ProofWorkspace() {
   useEffect(() => {
     const generation = ++bootstrapGeneration.current;
     const bootstrap = async () => {
-      const saved = window.localStorage.getItem("touchproof:current:v4");
+      const saved = window.localStorage.getItem("touchproof:current:v5");
       if (saved !== null) {
         try {
           if (saved.length > MAX_DOCUMENT_BYTES) throw new Error("Saved proof is too large");
@@ -62,7 +62,7 @@ export function ProofWorkspace() {
             const document: unknown = JSON.parse(saved);
             decodeProofSession(document);
           } catch {
-            window.localStorage.removeItem("touchproof:current:v4");
+            window.localStorage.removeItem("touchproof:current:v5");
             return backend.startLesson("bool-compute", (progress) => {
               if (bootstrapGeneration.current === generation) setLoadingMessage(progressText(progress));
             });
@@ -84,7 +84,7 @@ export function ProofWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (state !== undefined) window.localStorage.setItem("touchproof:current:v4", JSON.stringify(state.session));
+    if (state !== undefined) window.localStorage.setItem("touchproof:current:v5", JSON.stringify(state.session));
   }, [state]);
 
   useEffect(() => () => window.clearTimeout(resetTimer.current), []);
@@ -114,7 +114,7 @@ export function ProofWorkspace() {
     setError(undefined);
     setPreview(undefined);
     try {
-      window.localStorage.removeItem("touchproof:current:v4");
+      window.localStorage.removeItem("touchproof:current:v5");
       setState(await backend.startLesson(state?.session.lessonId ?? "bool-compute", (progress) => setLoadingMessage(progressText(progress))));
       setUndoStack([]);
       setRedoStack([]);

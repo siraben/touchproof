@@ -16,14 +16,17 @@ const markupOf = (source: string): string =>
 const textOf = (source: string): string => markupOf(source).replace(/<[^>]+>/g, "");
 
 describe("interactive expression renderer", () => {
-  it("parenthesizes nested infix operands (lesson 12 associativity)", () => {
-    expect(textOf("add(add(a, b), c)")).toBe("(a +\u00A0b) +\u00A0c");
+  it("renders nested infix operands with core's minimal parens (lesson 12 associativity)", () => {
+    // infixl 6 `+`: the left child at equal precedence stays bare, the right child is wrapped.
+    expect(textOf("add(add(a, b), c)")).toBe("a +\u00A0b +\u00A0c");
     expect(textOf("add(a, add(b, c))")).toBe("a +\u00A0(b +\u00A0c)");
   });
 
-  it("parenthesizes exactly like the hand-written scripts for append/cons", () => {
+  it("parenthesizes append/cons with core's minimal parens", () => {
+    // `::` and `++` share level 5 and associate right: a left `::` child is wrapped,
+    // a right `++` child at equal precedence on the associative side is not.
     expect(textOf("append(cons(x, xs), ys)")).toBe("(x ::\u00A0xs) ++\u00A0ys");
-    expect(textOf("cons(x, append(xs, ys))")).toBe("x ::\u00A0(xs ++\u00A0ys)");
+    expect(textOf("cons(x, append(xs, ys))")).toBe("x ::\u00A0xs ++\u00A0ys");
   });
 
   it("leaves applications bare inside infix operands", () => {

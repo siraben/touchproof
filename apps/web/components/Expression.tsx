@@ -1,7 +1,8 @@
 "use client";
 
-import type { ProgramExpr, ProofMove } from "@touchproof/core";
-import { expressionShape } from "@/lib/programDoc";
+import type { OperatorFixity, ProgramExpr, ProofMove } from "@touchproof/core";
+import { operatorByName } from "@touchproof/core";
+import { expressionShape, needsParens, type InfixSide } from "@/lib/programDoc";
 import { dropMove, movesForHandle } from "@/lib/viewModel";
 import { useSelection } from "./selectionContext";
 
@@ -15,10 +16,10 @@ export interface ExpressionProps {
   onMove: (moveId: string) => void;
 }
 
-/** An operand of an infix operator: nested infix expressions are wrapped,
- * exactly mirroring the pretty-printer's shared shape rules. */
-function ExprOperand({ expression, moves, onMove }: ExpressionProps) {
-  const wrap = expressionShape(expression, DOM_SHAPE) === "binary";
+/** An operand of an infix operator: parenthesized by the same shared
+ * minimal-parens rule the pretty-printer uses, so the two surfaces agree. */
+function ExprOperand({ expression, moves, onMove, parent, side }: ExpressionProps & { parent: OperatorFixity; side: InfixSide }) {
+  const wrap = needsParens(expression, parent, side);
   return (
     <>
       {wrap && <span className="paren">(</span>}
@@ -42,12 +43,24 @@ function ExprArgument({ expression, moves, onMove }: ExpressionProps) {
   );
 }
 
-// Exported for tests: the parenthesization must stay in lockstep with the
-// pretty-printer (both build on expressionShape).
+// Exported for tests: the parenthesization stays in lockstep with the
+// pretty-printer because both drive the infix path off the fixity table and
+// share the one needsParens decision.
 export function Expression({ expression, moves, onMove }: ExpressionProps) {
   const selection = useSelection();
   const fromHere = movesForHandle(moves, expression.id);
   const isDropTarget = moves.some((move) => move.dropTarget === expression.id);
+
+  // One table-driven infix path: the fixity table supplies the spelling and,
+  // via the shared needsParens, the side-aware minimal parens. Breakable space
+  // BEFORE the operator, NBSP after, so a wrapped operator starts the next line.
+  const infix = (operator: OperatorFixity, left: ProgramExpr, right: ProgramExpr) => (
+    <>
+      <ExprOperand expression={left} moves={moves} onMove={onMove} parent={operator} side="left" />
+      <span className="operator">{` ${operator.symbol}\u00A0`}</span>
+      <ExprOperand expression={right} moves={moves} onMove={onMove} parent={operator} side="right" />
+    </>
+  );
 
   const content = (() => {
     if (expression.kind === "var") return expression.name;
@@ -57,20 +70,16 @@ export function Expression({ expression, moves, onMove }: ExpressionProps) {
       if (expression.name === "succ" && expression.args.length === 1) {
         return <><span className="function-name">S</span><ExprArgument expression={expression.args[0]!} moves={moves} onMove={onMove} /></>;
       }
-      if (expression.name === "cons" && expression.args.length === 2) {
-        // Breakable space BEFORE the operator, NBSP after: a wrapped operator starts the continuation line.
-        return <><ExprOperand expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{" :: "}</span><ExprOperand expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
-      }
+      const constructorOperator = expression.args.length === 2 ? operatorByName(expression.name) : undefined;
+      if (constructorOperator !== undefined) return infix(constructorOperator, expression.args[0]!, expression.args[1]!);
       return <>{expression.name}{expression.args.map((arg) => <ExprArgument key={arg.id} expression={arg} moves={moves} onMove={onMove} />)}</>;
     }
-    if (expression.name === "compose" && expression.args.length === 2) {
-      return <><span className="paren">(</span><ExprOperand expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{" ∘ "}</span><ExprOperand expression={expression.args[1]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
-    }
+    const operator = expression.args.length === 2 ? operatorByName(expression.name) : undefined;
+    if (operator !== undefined) return infix(operator, expression.args[0]!, expression.args[1]!);
     if (expression.name === "apply" && expression.args.length === 2) {
-      return <><ExprOperand expression={expression.args[0]!} moves={moves} onMove={onMove} /><ExprArgument expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
-    }
-    if ((expression.name === "add" || expression.name === "append") && expression.args.length === 2) {
-      return <><ExprOperand expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{expression.name === "add" ? " + " : " ++ "}</span><ExprOperand expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
+      const fn = expression.args[0]!;
+      const wrapHead = expressionShape(fn, DOM_SHAPE) === "binary";
+      return <>{wrapHead && <span className="paren">(</span>}<Expression expression={fn} moves={moves} onMove={onMove} />{wrapHead && <span className="paren">)</span>}<ExprArgument expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
     }
     return <><span className="function-name">{expression.name}</span>{expression.args.map((arg) => <ExprArgument key={arg.id} expression={arg} moves={moves} onMove={onMove} />)}</>;
   })();

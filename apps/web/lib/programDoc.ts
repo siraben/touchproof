@@ -10,7 +10,8 @@
  * (plain `render` output is byte-identical to the untagged printer).
  */
 
-import type { DefinitionClause, InductiveDefinition, ProgramExpr } from "@touchproof/core";
+import type { DefinitionClause, InductiveDefinition, OperatorFixity, ProgramExpr } from "@touchproof/core";
+import { operatorByName } from "@touchproof/core";
 import { annotate, cat, group, hardline, line, nest, render, renderSegments, text, type Doc, type Segment } from "./doc";
 
 /** Highlighting tags shared by the doc printer and the script tokenizer. */
@@ -21,7 +22,39 @@ const tagged = (tag: TokenTag, value: string): Doc => annotate(tag, text(value))
 /** How an expression binds, for parenthesization. */
 export type ExpressionShape = "atom" | "application" | "binary";
 
-const INFIX: Readonly<Record<string, string>> = { add: "+", append: "++" };
+/** Which slot of a parent operator a child sits in. */
+export type InfixSide = "left" | "right";
+
+/**
+ * Precedence of an expression, on core's scale (see src/proof/ast.ts): an atom
+ * (variable or nullary head) binds tightest, prefix application sits just below
+ * every infix operator, and an infix operator carries its declared precedence.
+ */
+const ATOM_PRECEDENCE = 11;
+const APPLICATION_PRECEDENCE = 10;
+
+function operatorFor(expr: ProgramExpr): OperatorFixity | undefined {
+  return expr.kind !== "var" && expr.args.length === 2 ? operatorByName(expr.name) : undefined;
+}
+
+function precedenceOf(expr: ProgramExpr): number {
+  if (expr.kind === "var") return ATOM_PRECEDENCE;
+  const operator = operatorFor(expr);
+  if (operator !== undefined) return operator.precedence;
+  return expr.args.length === 0 ? ATOM_PRECEDENCE : APPLICATION_PRECEDENCE;
+}
+
+/**
+ * The single parenthesization authority, shared by this printer and the
+ * interactive Expression renderer so the two surfaces can never disagree and
+ * both reproduce core's minimal-parens convention exactly (src/proof/ast.ts):
+ * a child on the operator's associative side admits equal precedence, the
+ * other side requires strictly higher.
+ */
+export function needsParens(child: ProgramExpr, parent: OperatorFixity, side: InfixSide): boolean {
+  const minimum = parent.associativity === side ? parent.precedence : parent.precedence + 1;
+  return precedenceOf(child) < minimum;
+}
 
 /** The elements of a cons spine ending in nil, or undefined for open spines. */
 function listLiteral(expr: ProgramExpr): ProgramExpr[] | undefined {
@@ -34,25 +67,18 @@ function listLiteral(expr: ProgramExpr): ProgramExpr[] | undefined {
 }
 
 /**
- * The single parenthesization authority, shared by this printer and the
- * interactive Expression renderer so the two surfaces can never disagree:
- * infix operands parenthesize nested infix expressions ("binary"), while
- * applications and atoms stand bare; application arguments parenthesize
- * everything but atoms. `listLiterals` says whether the caller renders cons
- * spines ending in nil as `[x]` sugar (this printer does; the DOM view keeps
- * `x :: []` so every node stays a tappable span, hence cons stays "binary").
+ * Coarse structural class of an expression, used for application/argument
+ * wrapping (arguments parenthesize everything but atoms) and by tests. Any
+ * head that the fixity table knows as a binary operator is "binary". A cons
+ * spine ending in nil is an atom only when the caller renders `[x]` sugar
+ * (`listLiterals`); the DOM view keeps `x :: []` so every node stays a
+ * tappable span, hence cons stays "binary" there.
  */
 export function expressionShape(expr: ProgramExpr, options: { listLiterals: boolean }): ExpressionShape {
   if (expr.kind === "var") return "atom";
-  if (expr.kind === "ctor") {
-    if (options.listLiterals && listLiteral(expr) !== undefined) return "atom";
-    if (expr.name === "zero" || expr.name === "nil") return "atom";
-    if (expr.name === "cons") return "binary";
-    return expr.args.length === 0 ? "atom" : "application";
-  }
-  if (expr.name in INFIX && expr.args.length === 2) return "binary";
-  if (expr.name === "compose" && expr.args.length === 2) return "atom"; // self-parenthesized
-  return "application";
+  if (options.listLiterals && expr.kind === "ctor" && listLiteral(expr) !== undefined) return "atom";
+  if (operatorFor(expr) !== undefined) return "binary";
+  return expr.args.length === 0 ? "atom" : "application";
 }
 
 const shapeOf = (expr: ProgramExpr): ExpressionShape => expressionShape(expr, { listLiterals: true });
@@ -64,14 +90,21 @@ function argumentToDoc(expr: ProgramExpr): Doc {
   return shapeOf(expr) === "atom" ? exprToDoc(expr) : parenthesize(exprToDoc(expr));
 }
 
-/** An operand of an infix operator: nested infix operators are wrapped. */
-function operandToDoc(expr: ProgramExpr): Doc {
-  return shapeOf(expr) === "binary" ? parenthesize(exprToDoc(expr)) : exprToDoc(expr);
+/** An operand of an infix operator: wrapped per the shared minimal-parens rule. */
+function operandToDoc(expr: ProgramExpr, parent: OperatorFixity, side: InfixSide): Doc {
+  return needsParens(expr, parent, side) ? parenthesize(exprToDoc(expr)) : exprToDoc(expr);
 }
 
-/** Break-before-operator layout: `lhs ++ rhs` or `lhs\n  ++ rhs`. */
-function infixToDoc(operator: string, tag: TokenTag, left: ProgramExpr, right: ProgramExpr): Doc {
-  return group(cat(operandToDoc(left), nest(2, cat(line, tagged(tag, `${operator} `), operandToDoc(right)))));
+/**
+ * Break-before-operator layout: `lhs ++ rhs` or `lhs\n  ++ rhs`. Driven entirely
+ * by the fixity table — the operator spelling, spacing and the paren decision
+ * all come from `operator`, so no head is special-cased.
+ */
+function infixToDoc(operator: OperatorFixity, tag: TokenTag, left: ProgramExpr, right: ProgramExpr): Doc {
+  return group(cat(
+    operandToDoc(left, operator, "left"),
+    nest(2, cat(line, tagged(tag, `${operator.symbol}${operator.spacing}`), operandToDoc(right, operator, "right"))),
+  ));
 }
 
 /** Juxtaposed application: `head a b`, with each argument glued to the line. */
@@ -89,14 +122,12 @@ export function exprToDoc(expr: ProgramExpr): Doc {
     }
     if (expr.name === "zero") return tagged("ctor", "0");
     if (expr.name === "succ" && expr.args.length === 1) return applicationToDoc(tagged("ctor", "S"), expr.args);
-    if (expr.name === "cons" && expr.args.length === 2) return infixToDoc("::", "ctor", expr.args[0]!, expr.args[1]!);
+    const constructorOperator = operatorFor(expr);
+    if (constructorOperator !== undefined) return infixToDoc(constructorOperator, "ctor", expr.args[0]!, expr.args[1]!);
     return expr.args.length === 0 ? tagged("ctor", expr.name) : applicationToDoc(tagged("ctor", expr.name), expr.args);
   }
-  const operator = INFIX[expr.name];
-  if (operator !== undefined && expr.args.length === 2) return infixToDoc(operator, "operator", expr.args[0]!, expr.args[1]!);
-  if (expr.name === "compose" && expr.args.length === 2) {
-    return parenthesize(cat(operandToDoc(expr.args[0]!), tagged("operator", " ∘ "), operandToDoc(expr.args[1]!)));
-  }
+  const operator = operatorFor(expr);
+  if (operator !== undefined) return infixToDoc(operator, "operator", expr.args[0]!, expr.args[1]!);
   if (expr.name === "apply" && expr.args.length === 2) {
     const fn = expr.args[0]!;
     const head = shapeOf(fn) === "binary" ? parenthesize(exprToDoc(fn)) : exprToDoc(fn);

@@ -18,7 +18,10 @@ class CountingKernel implements KernelPort {
 async function finishLesson(backend: BrowserProofBackend, lessonId: string, limit = 100): Promise<ProofSnapshot> {
   let state = await backend.startLesson(lessonId);
   for (let index = 0; index < limit && state.session.goals.some((goal) => goal.status === "open"); index += 1) {
-    const move = state.moves.find((candidate) => candidate.kind === "cases" || candidate.kind === "induction")
+    // General mode offers analysis moves on every goal, repeatedly; the greedy
+    // driver only takes one before the first split or it would recurse forever.
+    const unsplit = state.session.ancestors.length === 0;
+    const move = (unsplit ? state.moves.find((candidate) => candidate.kind === "cases" || candidate.kind === "induction") : undefined)
       ?? state.moves.find((candidate) => candidate.kind === "reduce")
       ?? state.moves.find((candidate) => candidate.kind === "rewrite")
       ?? state.moves.find((candidate) => candidate.kind === "close");

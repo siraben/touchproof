@@ -1,8 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { inductiveDefinitions, inductiveToScript, parseProgramExpr, programDefinitions } from "@touchproof/core";
+import type { ProgramExpr } from "@touchproof/core";
+import { inductiveDefinitions, inductiveToScript, parseProgramExpr, programDefinitions, programExprToText } from "@touchproof/core";
 import { annotate, cat, group, line, nest, render, renderSegments, text } from "../lib/doc";
 import { clauseToScript, clauseToSegments, exprToDoc, expressionShape, inductiveToScriptAt } from "../lib/programDoc";
 import { tokenizeScript } from "../lib/scriptTokens";
+
+// Whether an expression uses one of the DOM/card printer's display-only
+// conventions that core's exprToText deliberately does NOT share: `[x]` list
+// sugar and juxtaposition `f x` for object-level `apply`. Everywhere else the
+// two printers agree byte-for-byte, so the core printer is the paren authority.
+function usesWebOnlySugar(expr: ProgramExpr): boolean {
+  if (expr.kind === "var") return false;
+  if (expr.kind === "call" && expr.name === "apply") return true;
+  if (expr.kind === "ctor" && (expr.name === "nil" || expr.name === "cons")) {
+    let tail: ProgramExpr = expr;
+    while (tail.kind === "ctor" && tail.name === "cons" && tail.args.length === 2) tail = tail.args[1]!;
+    if (tail.kind === "ctor" && tail.name === "nil") return true;
+  }
+  return expr.args.some(usesWebOnlySugar);
+}
 
 describe("doc combinators", () => {
   const document = group(cat(text("lhs ="), nest(2, cat(line, text("a really long right hand side")))));
@@ -27,7 +43,18 @@ describe("program documents", () => {
   it("round-trips every definition clause at width 80", () => {
     for (const definition of programDefinitions) {
       for (const clause of definition.clauses) {
-        expect(clauseToScript(definition.name, clause, 80)).toBe(clause.script);
+        // The card printer follows core's minimal-parens convention exactly, so
+        // the round-trip is pinned against core's exprToText (the authority)
+        // rather than the hand-written scripts, one of which — the append cons
+        // clause — carries now-redundant parens (`x :: (xs ++ ys)`) that both
+        // printers minimise to `x :: xs ++ ys`. Clauses that lean on the DOM
+        // printer's display-only sugar (`[x]`, `apply` juxtaposition), which
+        // core does not emit, keep pinning against their hand-written script.
+        const lhs: ProgramExpr = { id: `${definition.name}-lhs`, kind: "call", name: definition.name, args: clause.patterns };
+        const expected = usesWebOnlySugar(lhs) || usesWebOnlySugar(clause.result)
+          ? clause.script
+          : `${programExprToText(lhs)} = ${programExprToText(clause.result)}`;
+        expect(clauseToScript(definition.name, clause, 80)).toBe(expected);
       }
     }
   });
@@ -44,9 +71,13 @@ describe("program documents", () => {
     expect(clauseToScript(definition.name, cons, 36)).toBe("revAcc (x :: xs) acc =\n  revAcc xs (x :: acc)");
   });
 
-  it("parenthesizes nested infix operands (the lesson-12 associativity shape)", () => {
-    expect(render(exprToDoc(parseProgramExpr("add(add(a, b), c)")), 80)).toBe("(a + b) + c");
+  it("renders infix operands with core's minimal parens (lesson-12 associativity)", () => {
+    // `+` is infixl 6: the left child at equal precedence needs no parens, but
+    // the right child does — exactly what core's exprToText prints.
+    expect(render(exprToDoc(parseProgramExpr("add(add(a, b), c)")), 80)).toBe("a + b + c");
     expect(render(exprToDoc(parseProgramExpr("add(a, add(b, c))")), 80)).toBe("a + (b + c)");
+    expect(render(exprToDoc(parseProgramExpr("add(add(a, b), c)")), 80)).toBe(programExprToText(parseProgramExpr("add(add(a, b), c)")));
+    expect(render(exprToDoc(parseProgramExpr("add(a, add(b, c))")), 80)).toBe(programExprToText(parseProgramExpr("add(a, add(b, c))")));
     // The DOM renderer derives its parens from the same shape classification.
     expect(expressionShape(parseProgramExpr("add(a, b)"), { listLiterals: false })).toBe("binary");
     expect(expressionShape(parseProgramExpr("cons(x, nil)"), { listLiterals: false })).toBe("binary");
