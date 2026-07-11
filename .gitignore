@@ -1,7 +1,7 @@
-node_modules/
 .cache/
+.next/
 dist/
-**/.next/
-**/*.tsbuildinfo
+node_modules/
+apps/web/.next/
+apps/web/out/
 *.tsbuildinfo
-/.claude/

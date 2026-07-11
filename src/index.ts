@@ -52,7 +52,11 @@ export {
   enumerateProofMoves,
   applyProofMove,
   focusGoal,
+  markKernelChecked,
 } from "./proof/session.js";
+export { checkProofSession } from "./proof/certificate.js";
+export type { KernelCertificate } from "./proof/certificate.js";
+export { decodeProofSession, decodeServerProofSession } from "./proof/protocol.js";
 export type {
   Expr as ProgramExpr,
   Hypothesis as ProofHypothesis,

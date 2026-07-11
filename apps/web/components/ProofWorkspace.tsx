@@ -2,19 +2,29 @@
 
 import {
   definitionByName,
-  definitionsToScript,
+  decodeProofSession,
   inductiveByName,
   inductiveToScript,
-  type Lesson,
   type ProgramExpr,
   type ProofMove,
-  type ProofSession,
 } from "@touchproof/core";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  browserProofBackend,
+  type ProofAction,
+  type ProofSnapshot,
+  type ProgressListener,
+} from "@/lib/proof/browserProofBackend";
 import { dropMove, movesForHandle, proofProgress } from "@/lib/viewModel";
 
-type ApiState = { session: ProofSession; moves: ProofMove[]; lessons: Lesson[] };
 type View = "visual" | "notebook" | "script";
+
+const backend = browserProofBackend();
+const MAX_DOCUMENT_BYTES = 200_000;
+
+function progressText(progress: Parameters<ProgressListener>[0]): string {
+  return progress.phase === "checking" ? "The TouchProof kernel is checking this proof…" : "Checking proof…";
+}
 
 const SelectionContext = createContext<{
   selectedHandle?: string;
@@ -102,6 +112,9 @@ function Expression({
       const needsParens = value.kind === "call" || (value.kind === "ctor" && value.name !== "nil");
       return <><span className="function-name">rev</span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
     }
+    if (expression.name === "revAcc" && expression.args.length === 2) {
+      return <><span className="function-name">revAcc</span><span className="argument"><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /></span><span className="argument">(<Expression expression={expression.args[1]!} moves={moves} onMove={onMove} />)</span></>;
+    }
     if ((expression.name === "add" || expression.name === "append") && expression.args.length === 2) {
       return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator"> {expression.name === "add" ? "+" : "++"} </span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
     }
@@ -152,64 +165,102 @@ function Expression({
   );
 }
 
+function ScopeBox({ variables, children }: { variables: readonly string[]; children: React.ReactNode }) {
+  return variables.reduceRight<React.ReactNode>((content, variable) => (
+    <div className="scope-box" key={variable}>
+      <div className="scope-label">∀ {variable}<span>scope</span></div>
+      {content}
+    </div>
+  ), children);
+}
+
 export function ProofWorkspace() {
-  const [state, setState] = useState<ApiState>();
+  const [state, setState] = useState<ProofSnapshot>();
   const [view, setView] = useState<View>("visual");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [loadingMessage, setLoadingMessage] = useState("Preparing the TouchProof kernel…");
   const [selection, setSelection] = useState<{ handle: string; x: number; y: number }>();
-  const [undoStack, setUndoStack] = useState<ApiState[]>([]);
-  const [redoStack, setRedoStack] = useState<ApiState[]>([]);
+  const [undoStack, setUndoStack] = useState<ProofSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<ProofSnapshot[]>([]);
   const importInput = useRef<HTMLInputElement>(null);
+  const inFlight = useRef(false);
+  const bootstrapGeneration = useRef(0);
 
   useEffect(() => {
+    const generation = ++bootstrapGeneration.current;
     const bootstrap = async () => {
-      const saved = window.localStorage.getItem("touchproof:current:v3");
+      const saved = window.localStorage.getItem("touchproof:current:v4");
       if (saved !== null) {
-        const restored = await fetch("/api/proof", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ session: JSON.parse(saved) as unknown, inspect: true }),
-        });
-        if (restored.ok) return restored.json() as Promise<ApiState>;
-        window.localStorage.removeItem("touchproof:current:v3");
+        try {
+          if (saved.length > MAX_DOCUMENT_BYTES) throw new Error("Saved proof is too large");
+          const document: unknown = JSON.parse(saved);
+          decodeProofSession(document);
+          return await backend.restore(document, (progress) => {
+            if (bootstrapGeneration.current === generation) setLoadingMessage(progressText(progress));
+          });
+        } catch (reason) {
+          try {
+            if (saved.length > MAX_DOCUMENT_BYTES) throw new Error("Saved proof is too large");
+            const document: unknown = JSON.parse(saved);
+            decodeProofSession(document);
+          } catch {
+            window.localStorage.removeItem("touchproof:current:v4");
+            return backend.startLesson("bool-compute", (progress) => {
+              if (bootstrapGeneration.current === generation) setLoadingMessage(progressText(progress));
+            });
+          }
+          const detail = reason instanceof Error ? ` ${reason.message}` : "";
+          throw new Error(`The TouchProof kernel could not recheck the saved proof. Your document is still stored.${detail}`);
+        }
       }
-      const fresh = await fetch("/api/proof");
-      if (!fresh.ok) throw new Error("Could not start the proof session.");
-      return fresh.json() as Promise<ApiState>;
+      return backend.startLesson("bool-compute", (progress) => {
+        if (bootstrapGeneration.current === generation) setLoadingMessage(progressText(progress));
+      });
     };
-    bootstrap().then(setState).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not start TouchProof."));
+    void bootstrap().then((result) => {
+      if (bootstrapGeneration.current === generation) setState(result);
+    }).catch((reason: unknown) => {
+      if (bootstrapGeneration.current === generation) setError(reason instanceof Error ? reason.message : "Could not start TouchProof.");
+    });
+    return () => { bootstrapGeneration.current += 1; };
   }, []);
 
   useEffect(() => {
-    if (state !== undefined) window.localStorage.setItem("touchproof:current:v3", JSON.stringify(state.session));
+    if (state !== undefined) window.localStorage.setItem("touchproof:current:v4", JSON.stringify(state.session));
   }, [state]);
 
   const startLesson = async (lessonId: string) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(undefined);
     try {
-      const response = await fetch(`/api/proof?lesson=${encodeURIComponent(lessonId)}`);
-      if (!response.ok) throw new Error("Could not start that lesson.");
-      setState(await response.json() as ApiState);
+      setState(await backend.startLesson(lessonId, (progress) => setLoadingMessage(progressText(progress))));
       setUndoStack([]);
       setRedoStack([]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not start that lesson.");
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
 
   const reset = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
+    setError(undefined);
     try {
-      window.localStorage.removeItem("touchproof:current:v3");
-      const response = await fetch(`/api/proof?lesson=${encodeURIComponent(state?.session.lessonId ?? "bool-involution")}`);
-      setState(await response.json() as ApiState);
+      window.localStorage.removeItem("touchproof:current:v4");
+      setState(await backend.startLesson(state?.session.lessonId ?? "bool-involution", (progress) => setLoadingMessage(progressText(progress))));
       setUndoStack([]);
       setRedoStack([]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not reset the lesson.");
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -225,46 +276,44 @@ export function ProofWorkspace() {
   };
 
   const importDocument = async (file: File) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(undefined);
     try {
-      const session = JSON.parse(await file.text()) as unknown;
-      const response = await fetch("/api/proof", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ session, inspect: true }),
-      });
-      const result = await response.json() as ApiState & { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "The proof document was rejected.");
+      if (file.size > MAX_DOCUMENT_BYTES) throw new Error("The proof document is too large.");
+      const text = await file.text();
+      if (text.length > MAX_DOCUMENT_BYTES) throw new Error("The proof document is too large.");
+      const session = JSON.parse(text) as unknown;
+      const result = await backend.restore(session, (progress) => setLoadingMessage(progressText(progress)));
       setState(result);
       setUndoStack([]);
       setRedoStack([]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The proof document was rejected.");
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
 
-  const send = async (payload: { moveId?: string; focusGoalId?: string }) => {
-    if (state === undefined || busy) return;
+  const send = async (action: ProofAction) => {
+    if (state === undefined || inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(undefined);
     try {
-      const response = await fetch("/api/proof", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ session: state.session, ...payload }),
-      });
-      const result = await response.json() as ApiState & { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "The proof step was rejected.");
-      setUndoStack((previous) => [...previous, state]);
-      setRedoStack([]);
+      const result = await backend.dispatch(state.session, action, (progress) => setLoadingMessage(progressText(progress)));
+      if (action.kind === "apply-move") {
+        setUndoStack((previous) => [...previous, state]);
+        setRedoStack([]);
+      }
       setState(result);
       setSelection(undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The proof step was rejected.");
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -276,6 +325,7 @@ export function ProofWorkspace() {
   const contextualMoves = state?.moves.filter((move) => move.handle === selection?.handle) ?? [];
   const closeMove = state?.moves.find((move) => move.kind === "close");
   const undo = () => {
+    if (busy) return;
     const previous = undoStack.at(-1);
     if (previous === undefined || state === undefined) return;
     setUndoStack((items) => items.slice(0, -1));
@@ -284,6 +334,7 @@ export function ProofWorkspace() {
     setSelection(undefined);
   };
   const redo = () => {
+    if (busy) return;
     const next = redoStack.at(-1);
     if (next === undefined || state === undefined) return;
     setRedoStack((items) => items.slice(0, -1));
@@ -291,22 +342,23 @@ export function ProofWorkspace() {
     setState(next);
     setSelection(undefined);
   };
+  const selectHandle = (handle?: string, point?: { x: number; y: number }) => {
+    if (handle === undefined) setSelection(undefined);
+    else if (point !== undefined) setSelection({
+      handle,
+      x: Math.min(point.x, window.innerWidth - 410),
+      y: Math.min(point.y, window.innerHeight - 290),
+    });
+  };
 
   if (state === undefined) {
-    return <main className="loading"><div className="brand-mark">T</div><p>{error ?? "Preparing the proof…"}</p></main>;
+    return <main className="loading"><div className="brand-mark">T</div><p>{error ?? loadingMessage}</p>{error !== undefined && <button onClick={() => window.location.reload()}>Retry</button>}</main>;
   }
 
   return (
     <SelectionContext.Provider value={{
       ...(selection === undefined ? {} : { selectedHandle: selection.handle }),
-      select: (handle, point) => {
-        if (handle === undefined) setSelection(undefined);
-        else if (point !== undefined) setSelection({
-          handle,
-          x: Math.min(point.x, window.innerWidth - 410),
-          y: Math.min(point.y, window.innerHeight - 290),
-        });
-      },
+      select: selectHandle,
     }}>
     <main className="workspace" onClick={() => setSelection(undefined)}>
       <header className="topbar">
@@ -317,18 +369,18 @@ export function ProofWorkspace() {
           <button className={view === "script" ? "active" : ""} onClick={() => setView("script")}>Script</button>
         </div>
         <div className="header-actions">
-          <button className="history-button" disabled={undoStack.length === 0} title="Back one proof step" onClick={undo}>←</button>
-          <button className="history-button" disabled={redoStack.length === 0} title="Forward one proof step" onClick={redo}>→</button>
-          <button onClick={exportDocument}>Export</button>
-          <button onClick={() => importInput.current?.click()}>Import</button>
-          <button onClick={() => void reset()}>Reset</button>
+          <button className="history-button" disabled={busy || undoStack.length === 0} title="Back one proof step" onClick={undo}>←</button>
+          <button className="history-button" disabled={busy || redoStack.length === 0} title="Forward one proof step" onClick={redo}>→</button>
+          <button disabled={busy} onClick={exportDocument}>Export</button>
+          <button disabled={busy} onClick={() => importInput.current?.click()}>Import</button>
+          <button disabled={busy} onClick={() => void reset()}>Reset</button>
           <input ref={importInput} hidden type="file" accept="application/json,.json" onChange={(event) => {
             const file = event.target.files?.[0];
             if (file !== undefined) void importDocument(file);
             event.target.value = "";
           }} />
           <div className={`kernel-badge ${state.session.kernelStatus}`}>
-            <span />{state.session.kernelStatus === "checked" ? "Kernel checked" : "Checking each move"}
+            <span />{state.session.kernelStatus === "checked" ? "Kernel checked locally" : "Kernel checks every move locally"}
           </div>
         </div>
       </header>
@@ -362,7 +414,7 @@ export function ProofWorkspace() {
                 key={goal.id}
                 disabled={busy}
                 className={`${goal.id === state.session.focusedGoalId ? "active" : ""} ${goal.status}`}
-                onClick={() => void send({ focusGoalId: goal.id })}
+                onClick={() => void send({ kind: "focus-goal", goalId: goal.id })}
               >
                 <span>{goal.status === "solved" ? "✓" : index + 1}</span>{goal.label}
               </button>
@@ -377,15 +429,29 @@ export function ProofWorkspace() {
                 </div>
                 {currentGoal.hypotheses.map((hypothesis) => (
                   <div
-                    className="hypothesis-card"
+                    className={`hypothesis-card ${state.moves.some((move) => move.handle === hypothesis.id) ? "tappable" : ""}`}
                     draggable
                     key={hypothesis.id}
+                    role={state.moves.some((move) => move.handle === hypothesis.id) ? "button" : undefined}
+                    tabIndex={state.moves.some((move) => move.handle === hypothesis.id) ? 0 : undefined}
+                    title="Click for rewrite options, or drag onto a matching expression"
+                    onClick={(event) => {
+                      if (!state.moves.some((move) => move.handle === hypothesis.id)) return;
+                      event.stopPropagation();
+                      selectHandle(hypothesis.id, { x: event.clientX, y: event.clientY });
+                    }}
+                    onKeyDown={(event) => {
+                      if (!state.moves.some((move) => move.handle === hypothesis.id) || (event.key !== "Enter" && event.key !== " ")) return;
+                      event.preventDefault();
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      selectHandle(hypothesis.id, { x: bounds.right, y: bounds.bottom });
+                    }}
                     onDragStart={(event) => {
                       event.dataTransfer.setData("application/x-touchproof-handle", hypothesis.id);
                       event.dataTransfer.effectAllowed = "move";
                     }}
                   >
-                    <span>{hypothesis.name}</span>
+                    <span>{hypothesis.binders === undefined ? hypothesis.name : `∀ ${hypothesis.binders.map((binder) => binder.name).join(" ")}, ${hypothesis.name}`}</span>
                     <div><Expression expression={hypothesis.left} moves={[]} onMove={() => undefined} /> = <Expression expression={hypothesis.right} moves={[]} onMove={() => undefined} /></div>
                     <small>Click for options or drag onto a matching expression</small>
                   </div>
@@ -399,11 +465,11 @@ export function ProofWorkspace() {
                       event.preventDefault();
                       const handle = event.dataTransfer.getData("application/x-touchproof-handle");
                       const move = dropMove(state.moves, handle, "analysis-zone");
-                      if (move !== undefined) void send({ moveId: move.id });
+                      if (move !== undefined) void send({ kind: "apply-move", moveId: move.id });
                     }}
                   >
                     <strong>{analysisMove.kind === "cases" ? "Analyze this value" : "Use induction"}</strong>
-                    <span>Drag <code>{state.session.analysis?.variable}</code> here—or click it and choose the action.</span>
+                    <span>Drag <code>{analysisMove.variable}</code> here—or click it and choose the action.</span>
                   </div>
                 )}
               </CanvasCard>
@@ -420,16 +486,18 @@ export function ProofWorkspace() {
                 </CanvasCard>
               ))}
               <div className="case-label">Current obligation · {currentGoal.label}</div>
-              <div className={`equation-card ${busy ? "busy" : ""}`} onClick={(event) => event.stopPropagation()}>
-                <Expression expression={currentGoal.left} moves={state.moves} onMove={(moveId) => void send({ moveId })} />
-                <button
-                  className={`equals ${closeMove === undefined ? "" : "closable"}`}
-                  disabled={closeMove === undefined || busy}
-                  title={closeMove === undefined ? "Keep transforming until both sides match" : "Close by reflexivity"}
-                  onClick={() => closeMove !== undefined && void send({ moveId: closeMove.id })}
-                >=</button>
-                <Expression expression={currentGoal.right} moves={state.moves} onMove={(moveId) => void send({ moveId })} />
-              </div>
+              <ScopeBox variables={state.session.generalizedVariables}>
+                <div className={`equation-card ${busy ? "busy" : ""}`} onClick={(event) => event.stopPropagation()}>
+                  <Expression expression={currentGoal.left} moves={state.moves} onMove={(moveId) => void send({ kind: "apply-move", moveId })} />
+                  <button
+                    className={`equals ${closeMove === undefined ? "" : "closable"}`}
+                    disabled={closeMove === undefined || busy}
+                    title={closeMove === undefined ? "Keep transforming until both sides match" : "Close by reflexivity"}
+                    onClick={() => closeMove !== undefined && void send({ kind: "apply-move", moveId: closeMove.id })}
+                  >=</button>
+                  <Expression expression={currentGoal.right} moves={state.moves} onMove={(moveId) => void send({ kind: "apply-move", moveId })} />
+                </div>
+              </ScopeBox>
               {contextualMoves.length > 0 && (
                 <div
                   className="context-menu"
@@ -439,8 +507,8 @@ export function ProofWorkspace() {
                 >
                   <div className="context-menu-title">What do you want to do here?</div>
                   {contextualMoves.map((move) => (
-                    <button role="menuitem" key={move.id} onClick={() => void send({ moveId: move.id })}>
-                      <span>{move.kind === "cases" ? "⑂" : move.kind === "induction" ? "ℕ" : move.kind === "rewrite" ? "⇢" : "↳"}</span>
+                    <button role="menuitem" key={move.id} onClick={() => void send({ kind: "apply-move", moveId: move.id })}>
+                      <span>{move.kind === "cases" ? "⑂" : move.kind === "induction" ? "ℕ" : move.kind === "generalize" ? "∀" : move.kind === "rewrite" ? "⇢" : "↳"}</span>
                       <div><strong>{move.label}</strong><small>{move.explanation}</small></div>
                     </button>
                   ))}
@@ -452,14 +520,14 @@ export function ProofWorkspace() {
                 {state.moves.some((move) => move.kind === "rewrite")
                   ? "Drag IH onto the matching recursive call"
                   : analysisMove !== undefined
-                    ? `Drag ${state.session.analysis?.variable} into the analysis tray`
+                    ? `Drag ${analysisMove.variable} into the analysis tray`
                     : "Touch a dotted expression to apply its defining equation"}
               </div>
               <div className="canvas-help"><strong>Why this move?</strong><span>{state.moves[0]?.explanation ?? "Every local obligation is complete."}</span></div>
               <div className="move-palette">
                 {state.moves.map((move) => (
-                  <button key={move.id} disabled={busy} onClick={() => void send({ moveId: move.id })}>
-                    <span>{move.kind === "reduce" ? "↳" : move.kind === "rewrite" ? "⇢" : move.kind === "induction" || move.kind === "cases" ? "⑂" : "✓"}</span>
+                  <button key={move.id} disabled={busy} onClick={() => void send({ kind: "apply-move", moveId: move.id })}>
+                    <span>{move.kind === "reduce" ? "↳" : move.kind === "rewrite" ? "⇢" : move.kind === "generalize" ? "∀" : move.kind === "induction" || move.kind === "cases" ? "⑂" : "✓"}</span>
                     <div><strong>{move.label}</strong><small>{move.explanation}</small></div>
                   </button>
                 ))}
@@ -473,7 +541,7 @@ export function ProofWorkspace() {
               {state.session.goals.map((goal) => (
                 <article className="proof-cell" key={goal.id}>
                   <header><span>{goal.status === "solved" ? "✓" : "○"}</span> case {goal.label}</header>
-                  {goal.hypotheses.map((hypothesis) => <div className="notebook-ih" key={hypothesis.id}>IH · <Expression expression={hypothesis.left} moves={[]} onMove={() => undefined} /> = <Expression expression={hypothesis.right} moves={[]} onMove={() => undefined} /></div>)}
+                  {goal.hypotheses.map((hypothesis) => <ScopeBox key={hypothesis.id} variables={hypothesis.binders?.map((binder) => binder.name) ?? []}><div className="notebook-ih">{hypothesis.name} · <Expression expression={hypothesis.left} moves={[]} onMove={() => undefined} /> = <Expression expression={hypothesis.right} moves={[]} onMove={() => undefined} /></div></ScopeBox>)}
                   {goal.steps.map((step, index) => <div className="notebook-step" key={`${step.reason}-${index}`}><code>{step.equation}</code><small>{step.reason}</small></div>)}
                 </article>
               ))}
@@ -481,12 +549,13 @@ export function ProofWorkspace() {
           )}
           {view === "script" && (
             <div className="script-view">
-              <div className="script-caption">Parsed declarations and current proof state</div>
-              <pre>{`${state.session.inductiveNames.map(inductiveByName).filter((definition) => definition !== undefined).map(inductiveToScript).join("\n\n")}\n\n${definitionsToScript(state.session.definitionNames)}\n\ntheorem ${state.session.theorem} :\n  ${state.session.statement}\nproof\n${currentGoal?.steps.map((step) => `  ${step.equation}  -- ${step.reason}`).join("\n") ?? ""}`}</pre>
-              <p>The canvas, reducer, and this script are printed from the same AST and definition registry.</p>
+              <div className="script-caption">Exact dependent proof term checked inside this browser</div>
+              <pre>{state.script}</pre>
+              <p>Every displayed transition is checked by {state.kernelVersion}; completed lessons assemble and recheck the exact closed theorem term. Last local check: {state.evidence.elapsedMs} ms.</p>
             </div>
           )}
           {error !== undefined && <div className="error-toast" role="alert">{error}</div>}
+          {busy && error === undefined && <div className="checking-toast" role="status">{loadingMessage}</div>}
         </section>
       </div>
     </main>

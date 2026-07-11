@@ -51,8 +51,8 @@ export class Surd {
     return Surd.build(new Map([[ONE, r]]));
   }
 
-  static readonly zero = new Surd(new Map());
-  static readonly one = Surd.rational(Rational.one);
+  static readonly zero: Surd = new Surd(new Map());
+  static readonly one: Surd = Surd.rational(Rational.one);
 
   /** √v for a non-negative rational v, as an exact surd; undefined if v < 0. */
   static sqrt(v: Rational): Surd | undefined {

@@ -65,7 +65,7 @@ describe("enumerateMoves", () => {
     const nt = neg(cloneFresh(t));
     if (nt.kind !== "neg") throw new Error("unreachable");
     const s = sum([t, nt, int(1)]);
-    const eqn = equation(s as Expr, int(0));
+    const eqn = equation(s, int(0));
     const moves = byRule(enumerateMoves(mkJudgment(eqn)), "additive-cancellation");
     // Handles: t, nt, and nt's body (grabbing the digit grabs the signed term).
     expect(moves).toHaveLength(3);
@@ -78,7 +78,7 @@ describe("enumerateMoves", () => {
     const b = int(-3); // Neg(Integer)
     if (b.kind !== "neg") throw new Error("unreachable");
     const s = sum([a, b, variable("x")]);
-    const eqn = equation(s as Expr, int(0));
+    const eqn = equation(s, int(0));
     const moves = byRule(enumerateMoves(mkJudgment(eqn)), "combine-integers");
     // (a,b), (b,a), and (b,a) aliased to b's digit; x pairs are rejected.
     expect(moves).toHaveLength(3);
@@ -116,7 +116,7 @@ describe("enumerateMoves", () => {
     const x = variable("x");
     const lhs = product([three, x]);
     const six = int(6);
-    const eqn = equation(lhs as Expr, six);
+    const eqn = equation(lhs, six);
 
     const before = byRule(enumerateMoves(mkJudgment(eqn)), "divide-both-sides");
     expect(handles(before)).toEqual([lhs.id, three.id, x.id, six.id].sort());
@@ -141,7 +141,7 @@ describe("enumerateMoves", () => {
     const three = int(3);
     const two = int(2);
     const p = product([three, two, variable("x")]);
-    const eqn = equation(p as Expr, int(0));
+    const eqn = equation(p, int(0));
     const moves = byRule(enumerateMoves(mkJudgment(eqn)), "combine-integer-factors");
     expect(moves).toHaveLength(2); // (3,2) and (2,3); pairs with x are rejected
     expect(handles(moves)).toEqual([three.id, two.id].sort());
@@ -204,7 +204,7 @@ describe("enumerateMoves", () => {
     const x = variable("x");
     const lhs = product([three, x]);
     const six = int(6);
-    const eqn = equation(lhs as Expr, six);
+    const eqn = equation(lhs, six);
     const d = new Derivation(eqn);
 
     // 1. Drag the 3 under the other side: a bar appears under BOTH sides.
@@ -519,7 +519,7 @@ describe("enumerateMoves", () => {
     const roots = new Set<string>();
     for (const arm of arms) {
       let a = arm.judgment;
-      const c = (a.equation.lhs.kind === "sum" ? a.equation.lhs : a.equation.rhs) as Expr;
+      const c = (a.equation.lhs.kind === "sum" ? a.equation.lhs : a.equation.rhs);
       if (c.kind !== "sum") throw new Error("expected a linear sum arm");
       const constTerm = c.children.find((t) => t.kind === "int" || (t.kind === "neg" && t.child.kind === "int"))!;
       a = ap(a, moveFrom(a, "move-term-across", (n) => n.id === constTerm.id));
@@ -631,8 +631,8 @@ describe("enumerateMoves", () => {
     const x2 = variable("x");
     const lhs = product([int(2), x1]);
     const threeX = product([int(3), x2]);
-    const negTerm = neg(threeX as Expr);
-    const eqn = equation(lhs as Expr, sum([int(10), negTerm]) as Expr);
+    const negTerm = neg(threeX);
+    const eqn = equation(lhs, sum([int(10), negTerm]));
     const d = new Derivation(eqn);
 
     // 1. Drag −3x onto the 2x: it moves across as +3x.
@@ -714,7 +714,7 @@ describe("enumerateMoves", () => {
     const negTwo = int(-2);
     const x = variable("x");
     const lhs = product([negTwo, x]);
-    const eqn = equation(lhs as Expr, int(6), "<");
+    const eqn = equation(lhs, int(6), "<");
     const d = new Derivation(eqn);
 
     // 1. Drag the −2 under the 6: the relation flips.
@@ -763,7 +763,7 @@ describe("enumerateMoves", () => {
   it("returns moves that Derivation.apply accepts verbatim", () => {
     const x = variable("x");
     const two = int(2);
-    const eqn = equation(sum([x, two]) as Expr, int(5));
+    const eqn = equation(sum([x, two]), int(5));
     const d = new Derivation(eqn);
     const move = movesFrom(d.current, two.id)[0]!;
     const node = d.apply(ruleById(move.ruleId), move.location, move.params);

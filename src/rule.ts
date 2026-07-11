@@ -119,7 +119,7 @@ export interface BranchOutcome {
   readonly label: string;
   readonly equation: Equation;
   readonly diff: AnimationDiff;
-  readonly emits: readonly import("./assumptions.js").EmittedAssumption[];
+  readonly emits: readonly EmittedAssumption[];
 }
 
 export interface BranchingRule<P> {

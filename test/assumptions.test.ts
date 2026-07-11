@@ -10,7 +10,6 @@ import {
   multiplicativeCancellation,
   Rational,
   RulePreconditionViolation,
-  sum,
   variable,
   type Restriction,
 } from "../src/index.js";
@@ -27,7 +26,7 @@ describe("assumption lifecycle", () => {
   it("discharges constant restrictions immediately — recorded, not deleted", () => {
     const { eqn, d } = xEquals3();
     const node = d.apply(divideBothSides, eqn.id, { divisor: int(2) });
-    const r = d.current.assumptions.find((a) => a.kind === "restriction") as Restriction;
+    const r = d.current.assumptions.find((a) => a.kind === "restriction")!;
     expect(r).toBeDefined();
     expect(r.status).toBe("discharged");
     expect(r.dischargedBy).toBe("constant");
@@ -61,7 +60,7 @@ describe("assumption lifecycle", () => {
   it("pin discharges a restriction; unpin reactivates it", () => {
     const { eqn, d } = xEquals3();
     d.apply(divideBothSides, eqn.id, { divisor: variable("x") });
-    const active = () => d.current.assumptions.find((a) => a.kind === "restriction") as Restriction;
+    const active = () => d.current.assumptions.find((a) => a.kind === "restriction")!;
     expect(active().status).toBe("active");
 
     d.pinVariable("x", Rational.of(2));

@@ -1,8 +1,5 @@
-import { verifyLessonProof } from "./standardLibrary.js";
 import {
   allExpressions,
-  call,
-  cloneFresh,
   ctor,
   expressionEqual,
   exprToText,
@@ -23,12 +20,14 @@ export interface Hypothesis {
   readonly name: string;
   readonly left: Expr;
   readonly right: Expr;
+  readonly binders?: readonly { readonly name: string; readonly type: string }[];
 }
 
 export interface EquationGoal {
   readonly id: string;
   readonly label: string;
   readonly context: readonly string[];
+  readonly type: string;
   readonly hypotheses: readonly Hypothesis[];
   readonly left: Expr;
   readonly right: Expr;
@@ -39,17 +38,23 @@ export interface EquationGoal {
 export interface ProofStep {
   readonly equation: string;
   readonly reason: string;
+  readonly left: Expr;
+  readonly right: Expr;
 }
 
 export interface ProofSession {
   readonly lessonId: string;
   readonly theorem: string;
   readonly statement: string;
+  readonly theoremContext: readonly string[];
+  readonly theoremLeft: Expr;
+  readonly theoremRight: Expr;
   readonly analysis?: {
     readonly kind: "cases" | "induction";
     readonly variable: string;
     readonly type: "Bool" | "Nat" | "List";
   };
+  readonly generalizedVariables: readonly string[];
   readonly definitionNames: readonly string[];
   readonly inductiveNames: readonly string[];
   readonly branchLemmas?: Readonly<Record<string, readonly {
@@ -65,7 +70,7 @@ export interface ProofSession {
 
 export interface ProofMove {
   readonly id: string;
-  readonly kind: "reduce" | "cases" | "induction" | "rewrite" | "close";
+  readonly kind: "reduce" | "cases" | "induction" | "generalize" | "rewrite" | "close";
   readonly label: string;
   readonly explanation: string;
   readonly handle: string;
@@ -73,6 +78,8 @@ export interface ProofMove {
   readonly side?: "left" | "right";
   readonly targetId?: string;
   readonly hypothesisId?: string;
+  readonly variable?: string;
+  readonly analysisType?: "Bool" | "Nat" | "List";
 }
 
 export interface Lesson {
@@ -159,8 +166,17 @@ export const lessonCatalog: readonly Lesson[] = [
     sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html",
   },
   {
+    id: "list-rev-acc",
+    chapter: "9 · Generalization",
+    title: "Reverse with an accumulator",
+    concept: "Generalizing the induction hypothesis",
+    theorem: "revAcc xs acc = rev xs ++ acc",
+    source: "Adapted from the generalization pattern in Software Foundations, Logical Foundations: Induction",
+    sourceUrl: "https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html",
+  },
+  {
     id: "map-composition",
-    chapter: "9 · Higher-order functions",
+    chapter: "10 · Higher-order functions",
     title: "Map preserves composition",
     concept: "Induction and local rewriting",
     theorem: "map (f ∘ g) l = map f (map g l)",
@@ -180,36 +196,98 @@ function focusedGoal(session: ProofSession): EquationGoal {
   return goal;
 }
 
+interface ContextVariable {
+  readonly name: string;
+  readonly type: string;
+  readonly inductive?: "Bool" | "Nat" | "List";
+}
+
+function contextVariables(context: readonly string[]): ContextVariable[] {
+  return context.flatMap((entry) => {
+    const separator = entry.indexOf(":");
+    if (separator < 1) return [];
+    const sourceType = entry.slice(separator + 1).trim();
+    if (sourceType === "Type") return [];
+    const inductive = sourceType === "Bool" ? "Bool" as const
+      : sourceType === "Nat" ? "Nat" as const
+        : sourceType.startsWith("List") ? "List" as const
+          : undefined;
+    return entry.slice(0, separator).split(",").map((name): ContextVariable => ({
+      name: name.trim(),
+      type: sourceType,
+      ...(inductive === undefined ? {} : { inductive }),
+    }));
+  });
+}
+
+function matchGeneralized(
+  pattern: Expr,
+  value: Expr,
+  names: ReadonlySet<string>,
+  bindings: Map<string, Expr>,
+): boolean {
+  if (pattern.kind === "var" && names.has(pattern.name)) {
+    const previous = bindings.get(pattern.name);
+    if (previous === undefined) bindings.set(pattern.name, value);
+    return previous === undefined || expressionEqual(previous, value);
+  }
+  if (pattern.kind !== value.kind || pattern.name !== value.name) return false;
+  if (pattern.kind === "var" || value.kind === "var") return true;
+  return pattern.args.length === value.args.length
+    && pattern.args.every((child, index) => matchGeneralized(child, value.args[index]!, names, bindings));
+}
+
+export function instantiateHypothesis(hypothesis: Hypothesis, target: Expr): Expr | undefined {
+  const names = new Set(hypothesis.binders?.map((binder) => binder.name) ?? []);
+  if (names.size === 0) return expressionEqual(hypothesis.left, target) ? hypothesis.right : undefined;
+  const bindings = new Map<string, Expr>();
+  if (!matchGeneralized(hypothesis.left, target, names, bindings)) return undefined;
+  let result = hypothesis.right;
+  for (const [name, value] of bindings) result = replaceVariable(result, name, value);
+  return result;
+}
+
 interface LessonSpec {
   readonly theorem: string;
   readonly context: readonly string[];
+  readonly resultType: string;
   readonly left: string;
   readonly right: string;
   readonly definitions: readonly string[];
   readonly inductives: readonly string[];
-  readonly analysis?: NonNullable<ProofSession["analysis"]>;
   readonly branchLemmas?: ProofSession["branchLemmas"];
 }
 
 const lessonSpecs: Readonly<Record<string, LessonSpec>> = {
-  "bool-compute": { theorem: "negb_false", context: [], left: "negb(false)", right: "true", definitions: ["negb"], inductives: ["Bool"] },
-  "bool-involution": { theorem: "negb_involutive", context: ["b : Bool"], left: "negb(negb(b))", right: "b", definitions: ["negb"], inductives: ["Bool"], analysis: { kind: "cases", variable: "b", type: "Bool" } },
-  "nat-add-example": { theorem: "two_plus_one", context: [], left: "add(succ(succ(zero)), succ(zero))", right: "succ(succ(succ(zero)))", definitions: ["add"], inductives: ["Nat"] },
-  "nat-add-zero": { theorem: "add_zero_right", context: ["n : Nat"], left: "add(n, zero)", right: "n", definitions: ["add"], inductives: ["Nat"], analysis: { kind: "induction", variable: "n", type: "Nat" } },
-  "list-append-nil": { theorem: "append_nil_right", context: ["A : Type", "xs : List A"], left: "append(xs, nil)", right: "xs", definitions: ["append"], inductives: ["List"], analysis: { kind: "induction", variable: "xs", type: "List" } },
-  "list-map-append": { theorem: "map_append", context: ["A, B : Type", "f : A → B", "xs : List A", "ys : List A"], left: "map(f, append(xs, ys))", right: "append(map(f, xs), map(f, ys))", definitions: ["append", "map"], inductives: ["List"], analysis: { kind: "induction", variable: "xs", type: "List" } },
+  "bool-compute": { theorem: "negb_false", context: [], resultType: "Bool", left: "negb(false)", right: "true", definitions: ["negb"], inductives: ["Bool"] },
+  "bool-involution": { theorem: "negb_involutive", context: ["b : Bool"], resultType: "Bool", left: "negb(negb(b))", right: "b", definitions: ["negb"], inductives: ["Bool"] },
+  "nat-add-example": { theorem: "two_plus_one", context: [], resultType: "Nat", left: "add(succ(succ(zero)), succ(zero))", right: "succ(succ(succ(zero)))", definitions: ["add"], inductives: ["Nat"] },
+  "nat-add-zero": { theorem: "add_zero_right", context: ["n : Nat"], resultType: "Nat", left: "add(n, zero)", right: "n", definitions: ["add"], inductives: ["Nat"] },
+  "list-append-nil": { theorem: "append_nil_right", context: ["A : Type", "xs : List A"], resultType: "List A", left: "append(xs, nil)", right: "xs", definitions: ["append"], inductives: ["List"] },
+  "list-map-append": { theorem: "map_append", context: ["A, B : Type", "f : A → B", "xs : List A", "ys : List A"], resultType: "List B", left: "map(f, append(xs, ys))", right: "append(map(f, xs), map(f, ys))", definitions: ["append", "map"], inductives: ["List"] },
   "list-rev-append": {
-    theorem: "rev_append", context: ["A : Type", "xs : List A", "ys : List A"], left: "rev(append(xs, ys))", right: "append(rev(ys), rev(xs))", definitions: ["append", "rev"], inductives: ["List"], analysis: { kind: "induction", variable: "xs", type: "List" },
+    theorem: "rev_append", context: ["A : Type", "xs : List A", "ys : List A"], resultType: "List A", left: "rev(append(xs, ys))", right: "append(rev(ys), rev(xs))", definitions: ["append", "rev"], inductives: ["List"],
     branchLemmas: {
       "empty list": [{ id: "lemma-append-nil", name: "append_nil", left: "append(rev(ys), nil)", right: "rev(ys)" }],
       "x :: xs": [{ id: "lemma-append-assoc", name: "append_assoc", left: "append(append(rev(ys), rev(xs)), cons(x, nil))", right: "append(rev(ys), append(rev(xs), cons(x, nil)))" }],
     },
   },
   "list-rev-involution": {
-    theorem: "rev_involutive", context: ["A : Type", "xs : List A"], left: "rev(rev(xs))", right: "xs", definitions: ["append", "rev"], inductives: ["List"], analysis: { kind: "induction", variable: "xs", type: "List" },
+    theorem: "rev_involutive", context: ["A : Type", "xs : List A"], resultType: "List A", left: "rev(rev(xs))", right: "xs", definitions: ["append", "rev"], inductives: ["List"],
     branchLemmas: { "x :: xs": [{ id: "lemma-rev-append", name: "rev_append", left: "rev(append(rev(xs), cons(x, nil)))", right: "append(rev(cons(x, nil)), rev(rev(xs)))" }] },
   },
-  "map-composition": { theorem: "map_comp", context: ["A : Type", "f : A → A", "g : A → A", "l : List A"], left: "map(compose(f, g), l)", right: "map(f, map(g, l))", definitions: ["map", "apply"], inductives: ["List"], analysis: { kind: "induction", variable: "l", type: "List" } },
+  "map-composition": { theorem: "map_comp", context: ["A, B, C : Type", "f : B → C", "g : A → B", "l : List A"], resultType: "List C", left: "map(compose(f, g), l)", right: "map(f, map(g, l))", definitions: ["map", "apply"], inductives: ["List"] },
+  "list-rev-acc": {
+    theorem: "rev_acc_correct", context: ["A : Type", "xs : List A", "acc : List A"], resultType: "List A",
+    left: "revAcc(xs, acc)", right: "append(rev(xs), acc)", definitions: ["revAcc", "rev", "append"], inductives: ["List"],
+    branchLemmas: {
+      "x :: xs": [{
+        id: "lemma-append-assoc", name: "append_assoc",
+        left: "append(append(rev(xs), cons(x, nil)), acc)",
+        right: "append(rev(xs), append(cons(x, nil), acc))",
+      }],
+    },
+  },
 };
 
 export function createLessonSession(lessonId: string): ProofSession {
@@ -219,12 +297,14 @@ export function createLessonSession(lessonId: string): ProofSession {
   const left = parseProgramExpr(spec.left);
   const right = parseProgramExpr(spec.right);
   const goal: EquationGoal = {
-    id: "goal-root", label: lesson.title, context: spec.context, hypotheses: [], left, right, status: "open",
-    steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: "theorem statement" }],
+    id: "goal-root", label: lesson.title, context: spec.context, type: spec.resultType, hypotheses: [], left, right, status: "open",
+    steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: "theorem statement", left, right }],
   };
   return {
-    lessonId, theorem: spec.theorem, statement: lesson.theorem, definitionNames: spec.definitions, inductiveNames: spec.inductives,
-    ...(spec.analysis === undefined ? {} : { analysis: spec.analysis }),
+    lessonId, theorem: spec.theorem, statement: lesson.theorem,
+    theoremContext: spec.context, theoremLeft: left, theoremRight: right,
+    definitionNames: spec.definitions, inductiveNames: spec.inductives,
+    generalizedVariables: [],
     ...(spec.branchLemmas === undefined ? {} : { branchLemmas: spec.branchLemmas }),
     goals: [goal], focusedGoalId: goal.id, kernelStatus: "pending",
   };
@@ -238,23 +318,47 @@ export function enumerateProofMoves(session: ProofSession): ProofMove[] {
   const goal = focusedGoal(session);
   if (goal.status === "solved") return [];
   const moves: ProofMove[] = [];
-  if (goal.id === "goal-root" && session.analysis !== undefined) {
-    const analyzedVariable = allExpressions(goal.left).find(
-      (expr) => expr.kind === "var" && expr.name === session.analysis?.variable,
-    );
-    if (analyzedVariable !== undefined) {
-      moves.push({
-        id: `${session.analysis.kind}:${session.analysis.variable}`,
-        kind: session.analysis.kind,
-        label: session.analysis.kind === "cases"
-          ? `Case analysis on ${session.analysis.variable}`
-          : `Induct on ${session.analysis.variable}`,
-        explanation: session.analysis.kind === "cases"
-          ? `Consider every constructor of ${session.analysis.type}.`
-          : `Consider every constructor of ${session.analysis.type} and reuse the claim for recursive fields.`,
-        handle: analyzedVariable.id,
-        dropTarget: "analysis-zone",
-      });
+  if (goal.id === "goal-root" && session.analysis === undefined) {
+    for (const candidate of contextVariables(goal.context)) {
+      const occurrence = [...allExpressions(goal.left), ...allExpressions(goal.right)].find(
+        (expr) => expr.kind === "var" && expr.name === candidate.name,
+      );
+      if (occurrence === undefined) continue;
+      if (candidate.inductive !== undefined && !session.generalizedVariables.includes(candidate.name)) {
+        const inductive = inductiveByName(candidate.inductive);
+        if (inductive?.constructors.some((constructor) => constructor.fields.some((field) => field.recursive === true)) === true) {
+          moves.push({
+            id: `induction:${candidate.name}`,
+            kind: "induction",
+            label: `Induct on ${candidate.name}`,
+            explanation: `Consider every constructor of ${candidate.inductive} and add hypotheses for recursive fields.`,
+            handle: occurrence.id,
+            dropTarget: "analysis-zone",
+            variable: candidate.name,
+            analysisType: candidate.inductive,
+          });
+        }
+        moves.push({
+          id: `cases:${candidate.name}`,
+          kind: "cases",
+          label: `Case analysis on ${candidate.name}`,
+          explanation: `Consider every constructor of ${candidate.inductive}.`,
+          handle: occurrence.id,
+          dropTarget: "analysis-zone",
+          variable: candidate.name,
+          analysisType: candidate.inductive,
+        });
+      }
+      if (!session.generalizedVariables.includes(candidate.name)) {
+        moves.push({
+          id: `generalize:${candidate.name}`,
+          kind: "generalize",
+          label: `Generalize ${candidate.name}`,
+          explanation: `Move ${candidate.name} inside the next induction hypothesis so it can vary in recursive cases.`,
+          handle: occurrence.id,
+          variable: candidate.name,
+        });
+      }
     }
   }
   for (const side of ["left", "right"] as const) {
@@ -276,7 +380,7 @@ export function enumerateProofMoves(session: ProofSession): ProofMove[] {
   for (const hypothesis of goal.hypotheses) {
     for (const side of ["left", "right"] as const) {
       for (const expression of allExpressions(goal[side])) {
-        if (expressionEqual(expression, hypothesis.left)) {
+        if (instantiateHypothesis(hypothesis, expression) !== undefined) {
           moves.push({
             id: `rewrite:${hypothesis.id}:${side}:${expression.id}`,
             kind: "rewrite",
@@ -313,8 +417,13 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
   if (move === undefined) throw new Error(`illegal proof move: ${moveId}`);
   const goal = focusedGoal(session);
 
-  if ((move.kind === "induction" || move.kind === "cases") && session.analysis !== undefined) {
-    const { variable: name, type: analyzedType } = session.analysis;
+  if (move.kind === "generalize" && move.variable !== undefined) {
+    return { ...session, generalizedVariables: [...session.generalizedVariables, move.variable] };
+  }
+
+  if ((move.kind === "induction" || move.kind === "cases") && move.variable !== undefined && move.analysisType !== undefined) {
+    const name = move.variable;
+    const analyzedType = move.analysisType;
     const baseContext = goal.context.filter((entry) => !entry.startsWith(`${name} :`));
     const inductive = inductiveByName(analyzedType);
     if (inductive === undefined) throw new Error(`unknown inductive type ${analyzedType}`);
@@ -338,16 +447,24 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
             name: "IH",
             left: replaceVariable(goal.left, name, branch.recursive),
             right: replaceVariable(goal.right, name, branch.recursive),
+            ...(session.generalizedVariables.length === 0 ? {} : {
+              binders: session.generalizedVariables.map((variable) => {
+                const found = contextVariables(goal.context).find((candidate) => candidate.name === variable);
+                if (found === undefined) throw new Error(`cannot generalize unknown variable ${variable}`);
+                return { name: variable, type: found.type };
+              }),
+            }),
           }];
       return {
         id: `goal-${index}`,
         label: branch.label,
         context: branch.context,
+        type: goal.type,
         hypotheses,
         left,
         right,
         status: "open",
-        steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: `${branch.label} obligation` }],
+        steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: `${branch.label} obligation`, left, right }],
       };
     });
     obligations = obligations.map((obligation) => {
@@ -362,7 +479,12 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
         }))],
       };
     });
-    return { ...session, goals: obligations, focusedGoalId: obligations[0]!.id };
+    return {
+      ...session,
+      analysis: { kind: move.kind, variable: name, type: analyzedType },
+      goals: obligations,
+      focusedGoalId: obligations[0]!.id,
+    };
   }
 
   if (move.kind === "reduce" && move.side !== undefined && move.targetId !== undefined) {
@@ -372,10 +494,10 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
     const nextGoal = {
       ...goal,
       [move.side]: replaceById(goal[move.side], move.targetId, reduction.expression),
-    } as EquationGoal;
+    };
     const withStep = {
       ...nextGoal,
-      steps: [...goal.steps, { equation: equationToText(nextGoal), reason: move.label }],
+      steps: [...goal.steps, { equation: equationToText(nextGoal), reason: move.label, left: nextGoal.left, right: nextGoal.right }],
     };
     return updateGoal(session, withStep);
   }
@@ -383,27 +505,37 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
   if (move.kind === "rewrite" && move.side !== undefined && move.targetId !== undefined && move.hypothesisId !== undefined) {
     const hypothesis = goal.hypotheses.find((candidate) => candidate.id === move.hypothesisId);
     if (hypothesis === undefined) throw new Error("rewrite hypothesis is unavailable");
+    const target = allExpressions(goal[move.side]).find((expr) => expr.id === move.targetId);
+    const replacement = target === undefined ? undefined : instantiateHypothesis(hypothesis, target);
+    if (replacement === undefined) throw new Error("rewrite hypothesis does not match the target");
     const nextGoal = {
       ...goal,
-      [move.side]: replaceById(goal[move.side], move.targetId, hypothesis.right),
-    } as EquationGoal;
+      [move.side]: replaceById(goal[move.side], move.targetId, replacement),
+    };
     const withStep = {
       ...nextGoal,
-      steps: [...goal.steps, { equation: equationToText(nextGoal), reason: `rewrite with ${hypothesis.name}` }],
+      steps: [...goal.steps, { equation: equationToText(nextGoal), reason: `rewrite with ${hypothesis.name}`, left: nextGoal.left, right: nextGoal.right }],
     };
     return updateGoal(session, withStep);
   }
 
   if (move.kind === "close") {
-    const solved = { ...goal, status: "solved" as const, steps: [...goal.steps, { equation: equationToText(goal), reason: "reflexivity" }] };
+    const solved = { ...goal, status: "solved" as const, steps: [...goal.steps, { equation: equationToText(goal), reason: "reflexivity", left: goal.left, right: goal.right }] };
     const updated = updateGoal(session, solved);
     const nextOpen = updated.goals.find((candidate) => candidate.status === "open");
     if (nextOpen !== undefined) return { ...updated, focusedGoalId: nextOpen.id };
-    verifyLessonProof(session.lessonId);
-    return { ...updated, kernelStatus: "checked" };
+    return updated;
   }
 
   throw new Error(`unsupported proof move ${move.kind}`);
+}
+
+/** Only a successful check of the assembled dependent proof term may grant this status. */
+export function markKernelChecked(session: ProofSession): ProofSession {
+  if (session.goals.some((goal) => goal.status !== "solved")) {
+    throw new Error("the kernel cannot certify an incomplete proof");
+  }
+  return { ...session, kernelStatus: "checked" };
 }
 
 export function focusGoal(session: ProofSession, goalId: string): ProofSession {

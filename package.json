@@ -36,18 +36,32 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
     "dev": "corepack pnpm --dir apps/web dev",
     "build:web": "corepack pnpm --dir apps/web build",
+    "build:cloudflare": "TOUCHPROOF_STATIC_EXPORT=1 corepack pnpm build:web",
+    "deploy:cloudflare": "corepack pnpm build:cloudflare && wrangler deploy",
     "test:web": "corepack pnpm --dir apps/web test",
-    "check": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm build && corepack pnpm --dir apps/web typecheck && corepack pnpm --dir apps/web test && corepack pnpm build:web",
+    "check": "corepack pnpm typecheck && corepack pnpm lint && corepack pnpm test && corepack pnpm build && corepack pnpm --dir apps/web typecheck && corepack pnpm --dir apps/web test && corepack pnpm build:web",
     "prepublishOnly": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm build"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "^16.2.10",
     "@types/node": "^24.0.0",
+    "eslint": "^10.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "fast-check": "^4.1.1",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4"
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.110.0"
   },
-  "packageManager": "pnpm@10.12.1"
+  "packageManager": "pnpm@10.12.1",
+  "pnpm": {
+    "overrides": {
+      "postcss": "8.5.16"
+    }
+  }
 }

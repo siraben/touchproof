@@ -5,6 +5,7 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "isolatedDeclarations": true,
     "outDir": "dist"
   },
   "include": ["src"]

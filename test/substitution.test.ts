@@ -87,7 +87,7 @@ describe("substitution soundness", () => {
       fc.property(arbExpr, arbExpr, arbEnvs, (value, target, envs) => {
         const free = VAR_POOL.find((v) => !variablesIn(value).has(v));
         fc.pre(free !== undefined);
-        const sys = mkSystem([equation(variable(free!), value), equation(target, int(0))]);
+        const sys = mkSystem([equation(variable(free), value), equation(target, int(0))]);
         const sys2 = substituteInSystem(sys, 0, 1)!;
         for (const env of envs) {
           const t1 = systemTruth(sys, env);

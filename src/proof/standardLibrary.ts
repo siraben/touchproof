@@ -1,4 +1,4 @@
-import { check, type Environment } from "../kernel/checker.js";
+import { check, checkDeclaration, declareInductive, type Declaration, type Environment } from "../kernel/checker.js";
 import {
   app,
   apps,
@@ -7,6 +7,9 @@ import {
   equal,
   lambda,
   pi,
+  recursor,
+  refl,
+  subst,
   type,
   variable,
   type Term,
@@ -15,140 +18,188 @@ import {
 const c = constant;
 const v = variable;
 
-function pis(bindings: ReadonlyArray<readonly [string, Term]>, result: Term): Term {
+function pis(bindings: readonly (readonly [string, Term])[], result: Term): Term {
   return bindings.reduceRight((body, [name, domain]) => pi(name, domain, body), result);
 }
 
 export function touchProofEnvironment(): Environment {
-  const env = new Map<string, { type: Term }>();
-  const declare = (name: string, declarationType: Term): void => {
-    env.set(name, { type: declarationType });
-  };
+  let env: Environment = new Map();
+  const add = (name: string, declaration: Declaration): void => { env = checkDeclaration(name, declaration, env); };
+  env = declareInductive("Elem", [{ name: "element", fields: [] }], env);
+  env = declareInductive("Bool", [
+    { name: "true", fields: [] },
+    { name: "false", fields: [] },
+  ], env);
+  env = declareInductive("Nat", [
+    { name: "zero", fields: [] },
+    { name: "succ", fields: [{ name: "pred", type: c("Nat") }] },
+  ], env);
+  env = declareInductive("List", [
+    { name: "nil", fields: [] },
+    { name: "cons", fields: [{ name: "head", type: c("Elem") }, { name: "tail", type: c("List") }] },
+  ], env);
 
-  declare("Elem", type(0));
-  declare("Bool", type(0));
-  declare("true", c("Bool"));
-  declare("false", c("Bool"));
-  declare("negb", arrow(c("Bool"), c("Bool")));
-  declare("negb_true", equal(c("Bool"), app(c("negb"), c("true")), c("false")));
-  declare("negb_false", equal(c("Bool"), app(c("negb"), c("false")), c("true")));
-  declare("bool_induction", pis([
-    ["P", arrow(c("Bool"), type(0))],
-    ["trueCase", app(v("P"), c("true"))],
-    ["falseCase", app(v("P"), c("false"))],
-    ["b", c("Bool")],
-  ], app(v("P"), v("b"))));
+  const boolMotive = lambda("_", c("Bool"), c("Bool"));
+  add("negb", {
+    type: arrow(c("Bool"), c("Bool")),
+    value: lambda("b", c("Bool"), recursor("Bool", boolMotive, [c("false"), c("true")], v("b"))),
+  });
+  const natMotive = lambda("_", c("Nat"), c("Nat"));
+  add("add", {
+    type: pis([["left", c("Nat")], ["right", c("Nat")]], c("Nat")),
+    value: lambda("left", c("Nat"), lambda("right", c("Nat"), recursor("Nat", natMotive, [
+      v("right"),
+      lambda("pred", c("Nat"), lambda("ih_pred", c("Nat"), app(c("succ"), v("ih_pred")))),
+    ], v("left")))),
+  });
+  add("append", {
+    type: pis([["left", c("List")], ["right", c("List")]], c("List")),
+    value: lambda("left", c("List"), lambda("right", c("List"), recursor("List", lambda("_", c("List"), c("List")), [
+      v("right"),
+      lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", c("List"), apps(c("cons"), v("head"), v("ih_tail"))))),
+    ], v("left")))),
+  });
+  add("map", {
+    type: pis([["f", arrow(c("Elem"), c("Elem"))], ["xs", c("List")]], c("List")),
+    value: lambda("f", arrow(c("Elem"), c("Elem")), lambda("xs", c("List"), recursor("List", lambda("_", c("List"), c("List")), [
+      c("nil"),
+      lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", c("List"), apps(c("cons"), app(v("f"), v("head")), v("ih_tail"))))),
+    ], v("xs")))),
+  });
+  add("rev", {
+    type: arrow(c("List"), c("List")),
+    value: lambda("xs", c("List"), recursor("List", lambda("_", c("List"), c("List")), [
+      c("nil"),
+      lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", c("List"), apps(c("append"), v("ih_tail"), apps(c("cons"), v("head"), c("nil")))))),
+    ], v("xs"))),
+  });
+  add("revAcc", {
+    type: pis([["xs", c("List")], ["acc", c("List")]], c("List")),
+    value: lambda("xs", c("List"), lambda("acc", c("List"), apps(
+      recursor("List", lambda("_", c("List"), arrow(c("List"), c("List"))), [
+        lambda("current", c("List"), v("current")),
+        lambda("head", c("Elem"), lambda("tail", c("List"), lambda("ih_tail", arrow(c("List"), c("List")),
+          lambda("current", c("List"), app(v("ih_tail"), apps(c("cons"), v("head"), v("current"))))))),
+      ], v("xs")),
+      v("acc"),
+    ))),
+  });
+  add("compose", {
+    type: pis([["f", arrow(c("Elem"), c("Elem"))], ["g", arrow(c("Elem"), c("Elem"))], ["x", c("Elem")]], c("Elem")),
+    value: lambda("f", arrow(c("Elem"), c("Elem")), lambda("g", arrow(c("Elem"), c("Elem")), lambda("x", c("Elem"), app(v("f"), app(v("g"), v("x")))))),
+  });
 
-  declare("Nat", type(0));
-  declare("zero", c("Nat"));
-  declare("succ", arrow(c("Nat"), c("Nat")));
-  declare("add", pis([["left", c("Nat")], ["right", c("Nat")]], c("Nat")));
-  declare("add_zero_left", pis([["m", c("Nat")]],
-    equal(c("Nat"), apps(c("add"), c("zero"), v("m")), v("m"))));
-  declare("add_succ_left", pis([["n", c("Nat")], ["m", c("Nat")]], equal(
-    c("Nat"),
-    apps(c("add"), app(c("succ"), v("n")), v("m")),
-    app(c("succ"), apps(c("add"), v("n"), v("m"))),
-  )));
-  declare("nat_induction", pis([
-    ["P", arrow(c("Nat"), type(0))],
-    ["zeroCase", app(v("P"), c("zero"))],
-    ["succCase", pis([
-      ["n", c("Nat")], ["ih", app(v("P"), v("n"))],
-    ], app(v("P"), app(c("succ"), v("n"))))],
-    ["n", c("Nat")],
-  ], app(v("P"), v("n"))));
+  add("bool_induction", {
+    type: pis([["P", arrow(c("Bool"), type(0))], ["trueCase", app(v("P"), c("true"))], ["falseCase", app(v("P"), c("false"))], ["b", c("Bool")]], app(v("P"), v("b"))),
+    value: lambda("P", arrow(c("Bool"), type(0)), lambda("trueCase", app(v("P"), c("true")), lambda("falseCase", app(v("P"), c("false")), lambda("b", c("Bool"), recursor("Bool", v("P"), [v("trueCase"), v("falseCase")], v("b")))))),
+  });
+  add("nat_induction", {
+    type: pis([["P", arrow(c("Nat"), type(0))], ["zeroCase", app(v("P"), c("zero"))], ["succCase", pis([["n", c("Nat")], ["ih", app(v("P"), v("n"))]], app(v("P"), app(c("succ"), v("n"))))], ["n", c("Nat")]], app(v("P"), v("n"))),
+    value: lambda("P", arrow(c("Nat"), type(0)), lambda("zeroCase", app(v("P"), c("zero")), lambda("succCase", pis([["n", c("Nat")], ["ih", app(v("P"), v("n"))]], app(v("P"), app(c("succ"), v("n")))), lambda("n", c("Nat"), recursor("Nat", v("P"), [v("zeroCase"), v("succCase")], v("n")))))),
+  });
+  add("list_induction", {
+    type: pis([["P", arrow(c("List"), type(0))], ["nilCase", app(v("P"), c("nil"))], ["consCase", pis([["x", c("Elem")], ["xs", c("List")], ["ih", app(v("P"), v("xs"))]], app(v("P"), apps(c("cons"), v("x"), v("xs"))))], ["xs", c("List")]], app(v("P"), v("xs"))),
+    value: lambda("P", arrow(c("List"), type(0)), lambda("nilCase", app(v("P"), c("nil")), lambda("consCase", pis([["x", c("Elem")], ["xs", c("List")], ["ih", app(v("P"), v("xs"))]], app(v("P"), apps(c("cons"), v("x"), v("xs")))), lambda("xs", c("List"), recursor("List", v("P"), [v("nilCase"), v("consCase")], v("xs")))))),
+  });
 
-  declare("List", type(0));
-  declare("nil", c("List"));
-  declare("cons", pis([["head", c("Elem")], ["tail", c("List")]], c("List")));
-  declare("map", pis([
-    ["f", arrow(c("Elem"), c("Elem"))],
-    ["xs", c("List")],
-  ], c("List")));
-  declare("compose", pis([
-    ["f", arrow(c("Elem"), c("Elem"))],
-    ["g", arrow(c("Elem"), c("Elem"))],
-    ["x", c("Elem")],
-  ], c("Elem")));
+  add("eq_symm", {
+    type: pis([["A", type(0)], ["x", v("A")], ["y", v("A")], ["proof", equal(v("A"), v("x"), v("y"))]], equal(v("A"), v("y"), v("x"))),
+    value: lambda("A", type(0),
+      lambda("x", v("A"),
+        lambda("y", v("A"),
+          lambda("proof", equal(v("A"), v("x"), v("y")),
+            subst(v("proof"), lambda("z", v("A"), equal(v("A"), v("z"), v("x"))), refl(v("x"))))))),
+  });
+  add("eq_trans", {
+    type: pis([["A", type(0)], ["x", v("A")], ["y", v("A")], ["z", v("A")], ["left", equal(v("A"), v("x"), v("y"))], ["right", equal(v("A"), v("y"), v("z"))]], equal(v("A"), v("x"), v("z"))),
+    value: lambda("A", type(0),
+      lambda("x", v("A"),
+        lambda("y", v("A"),
+          lambda("z", v("A"),
+            lambda("left", equal(v("A"), v("x"), v("y")),
+              lambda("right", equal(v("A"), v("y"), v("z")),
+                subst(v("right"), lambda("w", v("A"), equal(v("A"), v("x"), v("w"))), v("left")))))))),
+  });
+  add("congr_arg", {
+    type: pis([["A", type(0)], ["B", type(0)], ["f", arrow(v("A"), v("B"))], ["x", v("A")], ["y", v("A")], ["proof", equal(v("A"), v("x"), v("y"))]], equal(v("B"), app(v("f"), v("x")), app(v("f"), v("y")))),
+    value: lambda("A", type(0),
+      lambda("B", type(0),
+        lambda("f", arrow(v("A"), v("B")),
+          lambda("x", v("A"),
+            lambda("y", v("A"),
+              lambda("proof", equal(v("A"), v("x"), v("y")),
+                subst(v("proof"),
+                  lambda("z", v("A"), equal(v("B"), app(v("f"), v("x")), app(v("f"), v("z")))),
+                  refl(app(v("f"), v("x")))))))))),
+  });
 
-  declare("map_nil", pis([["f", arrow(c("Elem"), c("Elem"))]],
-    equal(c("List"), apps(c("map"), v("f"), c("nil")), c("nil"))));
-  declare("map_cons", pis([
-    ["f", arrow(c("Elem"), c("Elem"))],
-    ["x", c("Elem")],
-    ["xs", c("List")],
-  ], equal(
-    c("List"),
-    apps(c("map"), v("f"), apps(c("cons"), v("x"), v("xs"))),
-    apps(c("cons"), app(v("f"), v("x")), apps(c("map"), v("f"), v("xs"))),
-  )));
-  declare("append", pis([["left", c("List")], ["right", c("List")]], c("List")));
-  declare("append_nil_left", pis([["ys", c("List")]],
-    equal(c("List"), apps(c("append"), c("nil"), v("ys")), v("ys"))));
-  declare("append_cons_left", pis([
-    ["x", c("Elem")], ["xs", c("List")], ["ys", c("List")],
-  ], equal(
-    c("List"),
-    apps(c("append"), apps(c("cons"), v("x"), v("xs")), v("ys")),
-    apps(c("cons"), v("x"), apps(c("append"), v("xs"), v("ys"))),
-  )));
-  declare("append_nil_right", pis([["xs", c("List")]],
-    equal(c("List"), apps(c("append"), v("xs"), c("nil")), v("xs"))));
-  declare("append_assoc", pis([
-    ["xs", c("List")], ["ys", c("List")], ["zs", c("List")],
-  ], equal(
-    c("List"),
-    apps(c("append"), apps(c("append"), v("xs"), v("ys")), v("zs")),
-    apps(c("append"), v("xs"), apps(c("append"), v("ys"), v("zs"))),
-  )));
-  declare("rev", arrow(c("List"), c("List")));
-  declare("rev_nil", equal(c("List"), app(c("rev"), c("nil")), c("nil")));
-  declare("rev_cons", pis([["x", c("Elem")], ["xs", c("List")]], equal(
-    c("List"),
-    app(c("rev"), apps(c("cons"), v("x"), v("xs"))),
-    apps(c("append"), app(c("rev"), v("xs")), apps(c("cons"), v("x"), c("nil"))),
-  )));
-  declare("rev_append", pis([["xs", c("List")], ["ys", c("List")]], equal(
-    c("List"),
-    app(c("rev"), apps(c("append"), v("xs"), v("ys"))),
-    apps(c("append"), app(c("rev"), v("ys")), app(c("rev"), v("xs"))),
-  )));
-  declare("compose_apply", pis([
-    ["f", arrow(c("Elem"), c("Elem"))],
-    ["g", arrow(c("Elem"), c("Elem"))],
-    ["x", c("Elem")],
-  ], equal(
-    c("Elem"),
-    apps(c("compose"), v("f"), v("g"), v("x")),
-    app(v("f"), app(v("g"), v("x"))),
-  )));
+  const equations: readonly [string, Term, Term][] = [
+    ["negb_true", equal(c("Bool"), app(c("negb"), c("true")), c("false")), app(c("negb"), c("true"))],
+    ["negb_false", equal(c("Bool"), app(c("negb"), c("false")), c("true")), app(c("negb"), c("false"))],
+    ["rev_nil", equal(c("List"), app(c("rev"), c("nil")), c("nil")), app(c("rev"), c("nil"))],
+  ];
+  for (const [name, theoremType, left] of equations) add(name, { type: theoremType, value: refl(left) });
+  addDefinitionalEquations(add);
 
-  declare("eq_symm", pis([
-    ["A", type(0)], ["x", v("A")], ["y", v("A")],
-    ["proof", equal(v("A"), v("x"), v("y"))],
-  ], equal(v("A"), v("y"), v("x"))));
-  declare("eq_trans", pis([
-    ["A", type(0)], ["x", v("A")], ["y", v("A")], ["z", v("A")],
-    ["left", equal(v("A"), v("x"), v("y"))],
-    ["right", equal(v("A"), v("y"), v("z"))],
-  ], equal(v("A"), v("x"), v("z"))));
-  declare("congr_arg", pis([
-    ["A", type(0)], ["B", type(0)], ["f", arrow(v("A"), v("B"))],
-    ["x", v("A")], ["y", v("A")], ["proof", equal(v("A"), v("x"), v("y"))],
-  ], equal(v("B"), app(v("f"), v("x")), app(v("f"), v("y")))));
-
-  const predicate = v("P");
-  declare("list_induction", pis([
-    ["P", arrow(c("List"), type(0))],
-    ["nilCase", app(predicate, c("nil"))],
-    ["consCase", pis([
-      ["x", c("Elem")], ["xs", c("List")], ["ih", app(predicate, v("xs"))],
-    ], app(predicate, apps(c("cons"), v("x"), v("xs"))))],
-    ["xs", c("List")],
-  ], app(predicate, v("xs"))));
-
+  const appendNil = appendNilRightProof();
+  add("append_nil_right", { type: appendNil.type, value: appendNil.term });
+  const appendAssoc = appendAssociativityProof();
+  add("append_assoc", { type: appendAssoc.type, value: appendAssoc.term });
+  const revAppend = revAppendProof();
+  add("rev_append", { type: revAppend.type, value: revAppend.term });
   return env;
+}
+
+function addDefinitionalEquations(add: (name: string, declaration: Declaration) => void): void {
+  const functionType = arrow(c("Elem"), c("Elem"));
+  const definitions: readonly [string, Term, Term][] = [
+    ["add_zero_left", pis([["m", c("Nat")]], equal(c("Nat"), apps(c("add"), c("zero"), v("m")), v("m"))),
+      lambda("m", c("Nat"), refl(apps(c("add"), c("zero"), v("m"))))],
+    ["add_succ_left", pis([["n", c("Nat")], ["m", c("Nat")]], equal(c("Nat"), apps(c("add"), app(c("succ"), v("n")), v("m")), app(c("succ"), apps(c("add"), v("n"), v("m"))))),
+      lambda("n", c("Nat"), lambda("m", c("Nat"), refl(apps(c("add"), app(c("succ"), v("n")), v("m")))))],
+    ["map_nil", pis([["f", functionType]], equal(c("List"), apps(c("map"), v("f"), c("nil")), c("nil"))),
+      lambda("f", functionType, refl(apps(c("map"), v("f"), c("nil"))))],
+    ["map_cons", pis([["f", functionType], ["x", c("Elem")], ["xs", c("List")]], equal(c("List"), apps(c("map"), v("f"), apps(c("cons"), v("x"), v("xs"))), apps(c("cons"), app(v("f"), v("x")), apps(c("map"), v("f"), v("xs"))))),
+      lambda("f", functionType, lambda("x", c("Elem"), lambda("xs", c("List"), refl(apps(c("map"), v("f"), apps(c("cons"), v("x"), v("xs")))))))],
+    ["append_nil_left", pis([["ys", c("List")]], equal(c("List"), apps(c("append"), c("nil"), v("ys")), v("ys"))),
+      lambda("ys", c("List"), refl(apps(c("append"), c("nil"), v("ys"))))],
+    ["append_cons_left", pis([["x", c("Elem")], ["xs", c("List")], ["ys", c("List")]], equal(c("List"), apps(c("append"), apps(c("cons"), v("x"), v("xs")), v("ys")), apps(c("cons"), v("x"), apps(c("append"), v("xs"), v("ys"))))),
+      lambda("x", c("Elem"), lambda("xs", c("List"), lambda("ys", c("List"), refl(apps(c("append"), apps(c("cons"), v("x"), v("xs")), v("ys"))))))],
+    ["rev_cons", pis([["x", c("Elem")], ["xs", c("List")]], equal(c("List"), app(c("rev"), apps(c("cons"), v("x"), v("xs"))), apps(c("append"), app(c("rev"), v("xs")), apps(c("cons"), v("x"), c("nil"))))),
+      lambda("x", c("Elem"), lambda("xs", c("List"), refl(app(c("rev"), apps(c("cons"), v("x"), v("xs"))))))],
+    ["compose_apply", pis([["f", functionType], ["g", functionType], ["x", c("Elem")]], equal(c("Elem"), apps(c("compose"), v("f"), v("g"), v("x")), app(v("f"), app(v("g"), v("x"))))),
+      lambda("f", functionType, lambda("g", functionType, lambda("x", c("Elem"), refl(apps(c("compose"), v("f"), v("g"), v("x"))))))],
+    ["revAcc_nil", pis([["acc", c("List")]], equal(c("List"), apps(c("revAcc"), c("nil"), v("acc")), v("acc"))),
+      lambda("acc", c("List"), refl(apps(c("revAcc"), c("nil"), v("acc"))))],
+    ["revAcc_cons", pis([["x", c("Elem")], ["xs", c("List")], ["acc", c("List")]], equal(c("List"), apps(c("revAcc"), apps(c("cons"), v("x"), v("xs")), v("acc")), apps(c("revAcc"), v("xs"), apps(c("cons"), v("x"), v("acc"))))),
+      lambda("x", c("Elem"), lambda("xs", c("List"), lambda("acc", c("List"), refl(apps(c("revAcc"), apps(c("cons"), v("x"), v("xs")), v("acc"))))))],
+  ];
+  for (const [name, theoremType, value] of definitions) add(name, { type: theoremType, value });
+}
+
+export function appendAssociativityProof(): { readonly type: Term; readonly term: Term } {
+  const list = c("List");
+  const xs = v("xs");
+  const ys = v("ys");
+  const zs = v("zs");
+  const x = v("x");
+  const tail = v("tail");
+  const append = (left: Term, right: Term): Term => apps(c("append"), left, right);
+  const proposition = (value: Term): Term => equal(list, append(append(value, ys), zs), append(value, append(ys, zs)));
+  const motive = lambda("value", list, proposition(v("value")));
+  const base = refl(append(append(c("nil"), ys), zs));
+  const step = lambda("x", c("Elem"), lambda("tail", list, lambda("ih", proposition(tail), congr(
+    list,
+    list,
+    lambda("rest", list, apps(c("cons"), x, v("rest"))),
+    append(append(tail, ys), zs),
+    append(tail, append(ys, zs)),
+    v("ih"),
+  ))));
+  return {
+    type: pis([["xs", list], ["ys", list], ["zs", list]], proposition(xs)),
+    term: lambda("xs", list, lambda("ys", list, lambda("zs", list, apps(c("list_induction"), motive, base, step, xs)))),
+  };
 }
 
 function symm(a: Term, x: Term, y: Term, proof: Term): Term {
@@ -499,8 +550,8 @@ export function revAppendProof(): { readonly type: Term; readonly term: Term } {
     trans(list, lhs, common, rhs, leftChain, symm(list, rhs, common, rightToCommon)))));
   const motive = lambda("xs", list, proposition(v("xs")));
   return {
-    type: pi("ys", list, pi("xs", list, proposition(v("xs")))),
-    term: lambda("ys", list, apps(c("list_induction"), motive, base, step)),
+    type: pi("xs", list, pi("ys", list, proposition(v("xs")))),
+    term: lambda("xs", list, lambda("ys", list, apps(c("list_induction"), motive, base, step, v("xs")))),
   };
 }
 

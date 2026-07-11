@@ -9,7 +9,7 @@ export class Rational {
   readonly num: bigint;
   readonly den: bigint;
 
-  constructor(num: bigint, den: bigint = 1n) {
+  constructor(num: bigint, den = 1n) {
     if (den === 0n) throw new DivisionByZero();
     if (den < 0n) {
       num = -num;
@@ -33,8 +33,8 @@ export class Rational {
     return new Rational(BigInt(m[1]!), den);
   }
 
-  static readonly zero = new Rational(0n);
-  static readonly one = new Rational(1n);
+  static readonly zero: Rational = new Rational(0n);
+  static readonly one: Rational = new Rational(1n);
 
   add(o: Rational): Rational {
     return new Rational(this.num * o.den + o.num * this.den, this.den * o.den);

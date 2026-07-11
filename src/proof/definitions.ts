@@ -9,6 +9,7 @@ export interface DefinitionClause {
 
 export interface ProgramDefinition {
   readonly name: string;
+  readonly arity: number;
   readonly type: string;
   readonly clauses: readonly DefinitionClause[];
 }
@@ -18,29 +19,34 @@ function clause(label: string, patterns: readonly string[], result: string, scri
 }
 
 export const programDefinitions: readonly ProgramDefinition[] = [
-  { name: "negb", type: "Bool → Bool", clauses: [
+  { name: "negb", arity: 1, type: "Bool → Bool", clauses: [
     clause("true", ["true"], "false", "negb true = false"),
     clause("false", ["false"], "true", "negb false = true"),
   ] },
-  { name: "add", type: "Nat → Nat → Nat", clauses: [
+  { name: "add", arity: 2, type: "Nat → Nat → Nat", clauses: [
     clause("zero", ["zero", "m"], "m", "0 + m = m"),
     clause("successor", ["succ(n)", "m"], "succ(add(n, m))", "S n + m = S (n + m)"),
   ] },
-  { name: "append", type: "List A → List A → List A", clauses: [
+  { name: "append", arity: 2, type: "List A → List A → List A", clauses: [
     clause("nil", ["nil", "ys"], "ys", "[] ++ ys = ys"),
     clause("cons", ["cons(x, xs)", "ys"], "cons(x, append(xs, ys))", "(x :: xs) ++ ys = x :: (xs ++ ys)"),
   ] },
-  { name: "map", type: "(A → B) → List A → List B", clauses: [
+  { name: "map", arity: 2, type: "(A → B) → List A → List B", clauses: [
     clause("nil", ["f", "nil"], "nil", "map f [] = []"),
     clause("cons", ["f", "cons(x, xs)"], "cons(apply(f, x), map(f, xs))", "map f (x :: xs) = f x :: map f xs"),
   ] },
-  { name: "rev", type: "List A → List A", clauses: [
+  { name: "rev", arity: 1, type: "List A → List A", clauses: [
     clause("nil", ["nil"], "nil", "rev [] = []"),
     clause("cons", ["cons(x, xs)"], "append(rev(xs), cons(x, nil))", "rev (x :: xs) = rev xs ++ [x]"),
   ] },
-  { name: "apply", type: "(A → B) → A → B", clauses: [
+  { name: "revAcc", arity: 2, type: "List A → List A → List A", clauses: [
+    clause("nil", ["nil", "acc"], "acc", "revAcc [] acc = acc"),
+    clause("cons", ["cons(x, xs)", "acc"], "revAcc(xs, cons(x, acc))", "revAcc (x :: xs) acc = revAcc xs (x :: acc)"),
+  ] },
+  { name: "apply", arity: 2, type: "(A → B) → A → B", clauses: [
     clause("composition", ["compose(f, g)", "x"], "apply(f, apply(g, x))", "(f ∘ g) x = f (g x)"),
   ] },
+  { name: "compose", arity: 2, type: "(B → C) → (A → B) → A → C", clauses: [] },
 ] as const;
 
 export function definitionByName(name: string): ProgramDefinition | undefined {

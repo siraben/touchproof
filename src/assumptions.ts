@@ -35,7 +35,7 @@ function isUndefinedness(err: unknown): boolean {
     err instanceof InexactSqrt
   );
 }
-import { DivisionByZero, Rational } from "./rational.js";
+import { DivisionByZero, type Rational } from "./rational.js";
 import { Surd } from "./surd.js";
 
 export type AssumptionOrigin =

@@ -18,7 +18,6 @@ import {
   layoutNode,
   neg,
   pow,
-  type Expr,
   type Layout,
   type LayoutRect,
   type Node,

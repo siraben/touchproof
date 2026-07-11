@@ -18,6 +18,13 @@ export type Term =
   | { readonly kind: "eq"; readonly type: Term; readonly left: Term; readonly right: Term }
   | { readonly kind: "refl"; readonly value: Term }
   | {
+      readonly kind: "recursor";
+      readonly inductive: string;
+      readonly motive: Term;
+      readonly cases: readonly Term[];
+      readonly target: Term;
+    }
+  | {
       readonly kind: "subst";
       readonly proof: Term;
       readonly motive: Term;
@@ -49,6 +56,12 @@ export const equal = (valueType: Term, left: Term, right: Term): Term => ({
   right,
 });
 export const refl = (value: Term): Term => ({ kind: "refl", value });
+export const recursor = (
+  inductive: string,
+  motive: Term,
+  cases: readonly Term[],
+  target: Term,
+): Term => ({ kind: "recursor", inductive, motive, cases, target });
 export const subst = (proof: Term, motive: Term, value: Term): Term => ({
   kind: "subst",
   proof,
@@ -56,7 +69,7 @@ export const subst = (proof: Term, motive: Term, value: Term): Term => ({
   value,
 });
 
-export function freeVariables(term: Term, bound = new Set<string>()): Set<string> {
+export function freeVariables(term: Term, bound: Set<string> = new Set<string>()): Set<string> {
   const result = new Set<string>();
   const visit = (current: Term, scope: Set<string>): void => {
     switch (current.kind) {
@@ -85,6 +98,11 @@ export function freeVariables(term: Term, bound = new Set<string>()): Set<string
         return;
       case "refl":
         visit(current.value, scope);
+        return;
+      case "recursor":
+        visit(current.motive, scope);
+        current.cases.forEach((branch) => visit(branch, scope));
+        visit(current.target, scope);
         return;
       case "subst":
         visit(current.proof, scope);
@@ -119,6 +137,8 @@ export function substitute(term: Term, name: string, replacement: Term): Term {
         return equal(go(current.type), go(current.left), go(current.right));
       case "refl":
         return refl(go(current.value));
+      case "recursor":
+        return recursor(current.inductive, go(current.motive), current.cases.map(go), go(current.target));
       case "subst":
         return subst(go(current.proof), go(current.motive), go(current.value));
       case "pi":
@@ -157,6 +177,7 @@ export function termToString(term: Term): string {
     case "app": return `(${termToString(term.fn)} ${termToString(term.arg)})`;
     case "eq": return `(${termToString(term.left)} = ${termToString(term.right)})`;
     case "refl": return `refl ${termToString(term.value)}`;
+    case "recursor": return `${term.inductive}.rec ${term.cases.map(termToString).join(" ")} ${termToString(term.target)}`;
     case "subst": return `subst ${termToString(term.proof)} ${termToString(term.motive)} ${termToString(term.value)}`;
   }
 }

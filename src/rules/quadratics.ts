@@ -33,7 +33,6 @@ import {
   RulePreconditionViolation,
   type BranchingRule,
   type BranchOutcome,
-  type Location,
   type Rule,
   type RuleApplication,
 } from "../rule.js";

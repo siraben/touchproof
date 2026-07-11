@@ -100,12 +100,12 @@ export function describeMove(judgment: Judgment, move: Move): string | undefined
     return n !== undefined && n.kind !== "equation" ? n : undefined;
   };
   const exprOf = (v: unknown): Expr | undefined =>
-    v !== null && typeof v === "object" && "kind" in (v as object) ? (v as Expr) : undefined;
+    v !== null && typeof v === "object" && "kind" in (v) ? (v as Expr) : undefined;
 
   switch (move.ruleId) {
     // — moves that change both sides (name the operand) —
     case "move-term-across": {
-      const t = termOf(params.termId);
+      const t = termOf(params["termId"]);
       if (t === undefined) return undefined;
       // Crossing the equals sign flips the term's sign: + term ⇒ subtract it,
       // − term ⇒ add its magnitude.
@@ -114,18 +114,18 @@ export function describeMove(judgment: Judgment, move: Move): string | undefined
         : `Subtract ${describeExpr(t)} from both sides`;
     }
     case "add-to-both-sides": {
-      const t = exprOf(params.term);
+      const t = exprOf(params["term"]);
       if (t === undefined) return undefined;
       return t.kind === "neg"
         ? `Add ${describeExpr(t.child)} to both sides`
         : `Subtract ${describeExpr(t)} from both sides`;
     }
     case "divide-both-sides": {
-      const d = exprOf(params.divisor);
+      const d = exprOf(params["divisor"]);
       return d ? `Divide both sides by ${describeExpr(d)}` : undefined;
     }
     case "multiply-both-sides": {
-      const f = exprOf(params.factor);
+      const f = exprOf(params["factor"]);
       return f ? `Multiply both sides by ${describeExpr(f)}` : undefined;
     }
     case "square-both-sides":
@@ -147,8 +147,8 @@ export function describeMove(judgment: Judgment, move: Move): string | undefined
     case "multiplicative-cancellation":
       return "Cancel the common factor";
     case "combine-integers": {
-      const a = termOf(params.termA);
-      const b = termOf(params.termB);
+      const a = termOf(params["termA"]);
+      const b = termOf(params["termB"]);
       if (a === undefined || b === undefined) return "Add the numbers";
       // Read in sum order so "6 − 1" stays "Add 6 and −1" whichever way it was
       // dragged. Showing the second number's sign is what makes "Add" honest:

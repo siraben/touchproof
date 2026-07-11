@@ -1,46 +1,33 @@
-# TouchProof task tracker
+# TouchProof tasks
 
-## Completed foundation
+## Working system
 
-- [x] Create `siraben/touchproof` as a GitHub fork with upstream history.
-- [x] Add a pinned `nix develop` environment and pnpm workspace.
-- [x] Add the dependent kernel with universes, Π-types, equality, substitution,
-      normalization, and independent term checking.
-- [x] Produce and check the induction proof term for map composition.
-- [x] Model induction branches as local proof obligations.
-- [x] Enumerate legal reduction, rewrite, induction, and reflexivity moves.
-- [x] Reject proof actions that were not enumerated.
-- [x] Build the visual-first Next.js editor and synchronized notebook view.
-- [x] Support dragging `l` into induction and dragging `IH` onto a matching term.
-- [x] Add keyboard/button equivalents for proof gestures.
-- [x] Add local persistence plus validated JSON import/export.
-- [x] Add a shared program AST/parser and declarative pattern-matching reducer.
-- [x] Generate case analysis and induction from inductive datatype metadata.
-- [x] Generate movable definition cards and script output from executable declarations.
-- [x] Add point-anchored contextual menus and back/forward proof history.
-- [x] Test the complete map-composition flow through the TypeScript API.
-- [x] Add the Software Foundations-inspired ramp through Boolean computation,
-      Boolean elimination, Nat computation and induction, append, map/append,
-      reverse/append, reverse involution, and map composition.
+- [x] Visual canvas, contextual point popovers, drag-and-drop rewrites, and
+      notebook/proof-term views.
+- [x] Generic reductions generated from parsed definition clauses.
+- [x] Generic case analysis and induction generated from datatype constructors.
+- [x] Generic variable generalization with visibly nested binder scopes.
+- [x] An accumulator-reverse lesson that requires a generalized induction
+      hypothesis.
+- [x] Predicative dependent kernel with universes, `Π`, lambda, application,
+      equality, equality elimination, inductive declarations, recursors, and
+      beta/delta/iota conversion.
+- [x] Strict positivity, universe, duplicate declaration, malformed recursor,
+      and alpha-capture rejection tests.
+- [x] Checked definitions and theorem declarations with a zero-axiom standard
+      environment inventory.
+- [x] Exact proof-term assembly from every visible transition and end-to-end
+      checking for every lesson.
+- [x] Browser-local persistence, import/export, undo/redo, strict decoding,
+      linting, and static deployment.
 
-## Kernel expansion
+## Next core extensions
 
-- [ ] Add checked strictly-positive user-defined inductive families.
-- [ ] Generate recursors and computation rules instead of bootstrapping the
-      initial List standard library as trusted declarations.
-- [ ] Add structural-termination checking for user-defined recursive functions.
-- [ ] Add dependent pairs and checked pattern-match coverage.
-- [ ] Add universe constraints and cumulative conversion beyond the initial
-      concrete hierarchy.
-
-## Notebook expansion
-
-- [ ] Add a versioned document schema and migrations.
-- [ ] Add visual editors for data and function definitions.
-- [ ] Add reverse rewriting, congruence selection, cases, constructor, and
-      hypothesis-introduction gestures.
-- [ ] Add undo/redo over the append-only derivation tree.
-- [ ] Add definition-building exercises for `nandb`, `andb3`, `hd_error`, and
-      user-authored recursive functions.
-- [ ] Add browser-level drag/drop and accessibility tests when a browser runner
-      is available in CI.
+- [ ] Universe-polymorphic datatype parameters rather than the curriculum's
+      erased element universe.
+- [ ] Indexed inductive families and dependent pattern matching.
+- [ ] Surface elaboration with implicit arguments, metavariables, and typed
+      holes for free-form theorem authoring.
+- [ ] A canvas editor for adding datatype and recursive function declarations
+      through the existing checked declaration APIs.
+- [ ] Sharing reusable checked libraries between local documents.

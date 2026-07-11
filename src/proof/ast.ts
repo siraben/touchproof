@@ -6,9 +6,9 @@ export type Expr =
 let nextId = 0;
 const freshId = (prefix: string): string => `${prefix}-${++nextId}`;
 
-export const programVar = (name: string, nodeId = freshId(name)): Expr => ({ id: nodeId, kind: "var", name });
-export const ctor = (name: string, args: readonly Expr[] = [], nodeId = freshId(name)): Expr => ({ id: nodeId, kind: "ctor", name, args });
-export const call = (name: string, args: readonly Expr[], nodeId = freshId(name)): Expr => ({ id: nodeId, kind: "call", name, args });
+export const programVar = (name: string, nodeId: string = freshId(name)): Expr => ({ id: nodeId, kind: "var", name });
+export const ctor = (name: string, args: readonly Expr[] = [], nodeId: string = freshId(name)): Expr => ({ id: nodeId, kind: "ctor", name, args });
+export const call = (name: string, args: readonly Expr[], nodeId: string = freshId(name)): Expr => ({ id: nodeId, kind: "call", name, args });
 
 export function cloneFresh(expr: Expr): Expr {
   if (expr.kind === "var") return programVar(expr.name);
@@ -60,6 +60,9 @@ export function exprToText(expr: Expr): string {
     const value = expr.args[0]!;
     const text = exprToText(value);
     return `${expr.name} ${value.kind === "var" || (value.kind === "ctor" && value.name === "nil") ? text : `(${text})`}`;
+  }
+  if (expr.name === "revAcc" && expr.args.length === 2) {
+    return `revAcc ${exprToText(expr.args[0]!)} ${expr.args[1]!.kind === "call" || expr.args[1]!.kind === "ctor" ? `(${exprToText(expr.args[1]!)})` : exprToText(expr.args[1]!)}`;
   }
   if ((expr.name === "add" || expr.name === "append") && expr.args.length === 2) {
     return `${exprToText(expr.args[0]!)} ${expr.name === "add" ? "+" : "++"} ${exprToText(expr.args[1]!)}`;

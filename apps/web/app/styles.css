@@ -59,6 +59,10 @@ h1 { margin: 5px 0 0; font: 700 32px/1.1 Georgia, serif; letter-spacing: -.025em
 .induction-zone:hover { border-color: var(--green); background: rgba(201,247,223,.35); }
 .induction-zone strong { color: var(--ink); }
 .induction-zone span { font-size: 13px; line-height: 1.45; }
+.scope-box { position: relative; margin: 14px 0; padding: 28px 14px 14px; border: 1px solid rgba(74, 98, 122, .28); border-radius: 16px; background: rgba(105, 132, 158, .10); box-shadow: inset 3px 0 0 rgba(74, 98, 122, .24); }
+.scope-box .scope-box { margin: 8px 0 0; background: rgba(105, 132, 158, .09); }
+.scope-label { position: absolute; top: 7px; left: 12px; display: flex; align-items: baseline; gap: 7px; color: #40566d; font: 700 12px/1.2 var(--mono); }
+.scope-label span { color: var(--muted); font: 600 10px/1.2 var(--sans); text-transform: uppercase; letter-spacing: .08em; }
 .lesson-source { display: block; margin: 13px 2px 0; color: var(--muted); font-size: 10px; line-height: 1.4; text-decoration: none; }
 .lesson-source:hover { color: var(--green); }
 .why-card { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 18px; }
@@ -132,7 +136,10 @@ h1 { margin: 5px 0 0; font: 700 32px/1.1 Georgia, serif; letter-spacing: -.025em
 .notebook-step code { font: 14px/1.5 Georgia, serif; }
 .notebook-step small { color: var(--muted); }
 .error-toast { position: fixed; right: 24px; bottom: 24px; padding: 13px 17px; border-radius: 11px; background: #782f2f; color: white; box-shadow: var(--shadow); }
+.checking-toast { position: fixed; right: 24px; bottom: 24px; z-index: 80; padding: 13px 17px; border: 1px solid #a7c9b7; border-radius: 11px; background: var(--panel); color: var(--green); box-shadow: var(--shadow); font-size: 13px; font-weight: 700; }
 .loading { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); }
+.loading p { max-width: 580px; text-align: center; line-height: 1.55; }
+.loading button { border: 1px solid var(--line); border-radius: 9px; padding: 9px 16px; background: var(--panel); color: var(--ink); cursor: pointer; }
 
 @media (max-width: 800px) {
   .topbar { grid-template-columns: 1fr auto; padding: 0 16px; }

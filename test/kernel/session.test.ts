@@ -6,6 +6,7 @@ import {
   enumerateProofMoves,
   equationToText,
 } from "../../src/proof/session.js";
+import { checkProofSession } from "../../src/proof/certificate.js";
 
 function applyFirst(session: ReturnType<typeof createMapCompositionSession>, predicate: (id: string) => boolean) {
   const move = enumerateProofMoves(session).find((candidate) => predicate(candidate.id));
@@ -34,10 +35,28 @@ function reduceUntilReflexive(session: ReturnType<typeof createMapCompositionSes
 }
 
 describe("visual proof session", () => {
-  it("offers only induction before an unknown list can reduce", () => {
+  it("offers every generic structural action on an unknown list", () => {
     const session = createMapCompositionSession();
-    expect(enumerateProofMoves(session).map((move) => move.kind)).toEqual(["induction"]);
+    expect(enumerateProofMoves(session).filter((move) => move.variable === "l").map((move) => move.kind))
+      .toEqual(["induction", "cases", "generalize"]);
     expect(equationToText(session.goals[0]!)).toBe("map (f ∘ g) l = map f (map g l)");
+  });
+
+  it("generalizes an accumulator into the induction hypothesis scope", () => {
+    let weak = applyProofMove(createLessonSession("list-rev-acc"), "induction:xs");
+    while (true) {
+      const move = enumerateProofMoves(weak).find((candidate) => candidate.kind === "reduce" || candidate.kind === "rewrite" || candidate.kind === "close");
+      if (move === undefined) break;
+      weak = applyProofMove(weak, move.id);
+    }
+    expect(weak.goals.some((goal) => goal.status === "open")).toBe(true);
+
+    let strong = applyProofMove(createLessonSession("list-rev-acc"), "generalize:acc");
+    strong = applyProofMove(strong, "induction:xs");
+    expect(strong.goals[1]?.hypotheses.find((hypothesis) => hypothesis.name === "IH")?.binders)
+      .toEqual([{ name: "acc", type: "List A" }]);
+    while (strong.goals.some((goal) => goal.status === "open")) strong = reduceUntilReflexive(strong);
+    expect(checkProofSession(strong).theoremTerm).toBeDefined();
   });
 
   it("proves map composition through local obligations", () => {
@@ -54,7 +73,8 @@ describe("visual proof session", () => {
 
     session = reduceUntilReflexive(session);
     expect(session.goals.every((goal) => goal.status === "solved")).toBe(true);
-    expect(session.kernelStatus).toBe("checked");
+    expect(session.kernelStatus).toBe("pending");
+    expect(checkProofSession(session).theoremTerm).toBeDefined();
     expect(session.goals[1]?.steps.some((step) => step.reason === "rewrite with IH")).toBe(true);
   });
 
@@ -68,14 +88,14 @@ describe("visual proof session", () => {
   ])("completes the %s curriculum lesson", (lessonId, analysisMove) => {
     let session = createLessonSession(lessonId);
     session = applyProofMove(session, analysisMove);
-    while (session.kernelStatus !== "checked") session = reduceUntilReflexive(session);
+    while (session.goals.some((goal) => goal.status === "open")) session = reduceUntilReflexive(session);
     expect(session.goals.every((goal) => goal.status === "solved")).toBe(true);
-    expect(session.kernelStatus).toBe("checked");
+    expect(session.kernelStatus).toBe("pending");
   });
 
   it.each(["bool-compute", "nat-add-example"])("completes the %s computation lesson", (lessonId) => {
     const session = reduceUntilReflexive(createLessonSession(lessonId));
-    expect(session.kernelStatus).toBe("checked");
+    expect(session.kernelStatus).toBe("pending");
   });
 
   it("rejects moves that were not enumerated", () => {

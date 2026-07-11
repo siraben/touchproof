@@ -12,7 +12,7 @@
         let pkgs = import nixpkgs { inherit system; };
         in {
           default = pkgs.mkShell {
-            packages = with pkgs; [ nodejs_22 git ];
+            packages = with pkgs; [ nodejs_24 git ];
             shellHook = ''
               export NEXT_TELEMETRY_DISABLED=1
               export COREPACK_HOME="$PWD/.cache/corepack"

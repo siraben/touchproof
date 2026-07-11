@@ -16,7 +16,6 @@ import {
   replaceTermRespectingInvariants,
   sum,
   type Equation,
-  type Expr,
   type NodeId,
 } from "../expr.js";
 import {
@@ -158,7 +157,7 @@ export const powerZero: Rule<Record<string, never>> = {
     if (node === undefined) {
       throw new RulePreconditionViolation(this.id, "location is not a power with exponent 0");
     }
-    const one = int(1) as Expr;
+    const one = int(1);
     const tree2 = replaceTermRespectingInvariants(tree, node.id, one);
     return {
       equation: tree2,

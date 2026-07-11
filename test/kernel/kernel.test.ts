@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { check, definitionallyEqual, infer, KernelError, normalize } from "../../src/kernel/checker.js";
-import { app, arrow, equal, lambda, refl, subst, type, variable } from "../../src/kernel/term.js";
+import { check, checkDeclaration, declareInductive, definitionallyEqual, infer, KernelError, normalize } from "../../src/kernel/checker.js";
+import { app, constant, equal, lambda, pi, recursor, refl, subst, type, variable } from "../../src/kernel/term.js";
 import {
   addZeroRightProof,
   appendNilRightProof,
@@ -37,6 +37,48 @@ describe("dependent kernel", () => {
   it("rejects ill-typed applications", () => {
     const bad = app(lambda("x", type(0), variable("x")), lambda("y", type(0), variable("y")));
     expect(() => infer(bad, new Map(), new Map())).toThrow(KernelError);
+  });
+
+  it("does not capture free variables during alpha conversion", () => {
+    const freeA = pi("x", type(0), variable("A"));
+    const boundA = pi("A", type(0), variable("A"));
+    expect(definitionallyEqual(freeA, boundA, new Map())).toBe(false);
+  });
+
+  it("declares and computes with a strictly-positive inductive type", () => {
+    const environment = declareInductive("Bit", [
+      { name: "off", fields: [] },
+      { name: "on", fields: [] },
+    ], new Map());
+    const motive = lambda("_", constant("Bit"), constant("Bit"));
+    const flipped = recursor("Bit", motive, [constant("on"), constant("off")], constant("off"));
+    expect(definitionallyEqual(flipped, constant("on"), environment)).toBe(true);
+    expect(() => infer(flipped, new Map(), environment)).not.toThrow();
+  });
+
+  it("supports empty inductives and rejects malformed declarations", () => {
+    expect(() => declareInductive("False", [], new Map())).not.toThrow();
+    expect(() => declareInductive("Huge", [
+      { name: "pack", fields: [{ name: "A", type: type(1) }] },
+    ], new Map())).toThrow(KernelError);
+    expect(() => declareInductive("Bad", [
+      { name: "bad", fields: [{ name: "f", type: pi("_", constant("Bad"), type(0)) }] },
+    ], new Map())).toThrow(KernelError);
+    expect(() => declareInductive("Dup", [
+      { name: "dup", fields: [{ name: "x", type: type(0) }, { name: "x", type: type(0) }] },
+    ], new Map())).toThrow(KernelError);
+  });
+
+  it("keeps checked environments append-only", () => {
+    const environment = checkDeclaration("U", { type: type(1), value: type(0) }, new Map());
+    expect(() => checkDeclaration("U", { type: type(1), value: type(0) }, environment)).toThrow(KernelError);
+  });
+
+  it("ships no unproved standard-library constants", () => {
+    for (const [name, declaration] of touchProofEnvironment()) {
+      const generated = declaration.inductive !== undefined || declaration.constructorInfo !== undefined;
+      expect(declaration.value !== undefined || generated, `${name} is an unchecked axiom`).toBe(true);
+    }
   });
 
   it("independently checks the map-composition induction term", () => {

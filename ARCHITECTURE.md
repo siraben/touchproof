@@ -2,86 +2,82 @@
 
 ## Product invariant
 
-The UI never constructs an arbitrary proof action. It asks the engine for
-legal `ProofMove` values and renders those values as taps, drags, drop targets,
-and accessible buttons. `applyProofMove` enumerates again before applying an
-action, so a stale or forged move identifier is rejected.
+The UI never invents proof actions. It asks `enumerateProofMoves` for the legal
+moves at the current goal and renders those values as contextual popovers,
+drags, drop targets, and accessible buttons. `applyProofMove` enumerates again,
+so stale or forged identifiers fail without changing the document.
 
-A proof move contains a stable handle id and, for drag operations, a stable
-drop-target id. Untouched expression nodes retain their ids across rewrites.
-This is the same interaction contract that makes Wyrm Math manipulable rather
-than form-like; see `docs/WYRM_ARCHITECTURE.md` for the upstream design.
+Lessons contain theorem statements, visible definitions, inductive declarations,
+and previously proved lemmas. They do not contain tactic scripts. Case analysis,
+induction, generalization, reduction, rewriting, and reflexivity are generated
+from the same generic engine used for user-authored documents.
 
-## Trusted kernel
+## Trusted dependent kernel
 
-`src/kernel` is intentionally independent from React, Next.js, proof-session
-state, and gesture code. Its term language currently contains:
+`src/kernel/term.ts` defines the core calculus:
 
-- predicative universes;
-- dependent function types and annotated lambdas;
-- application and global declarations;
-- intensional equality, reflexivity, and equality substitution.
+- predicative `Type u` universes;
+- dependent `Π` types, annotated lambdas, and application;
+- intensional equality, reflexivity, and equality elimination;
+- generic recursor terms for registered inductive types.
 
-The checker performs capture-avoiding substitution, beta/delta reduction,
-normalization, alpha-aware definitional equality, inference, and checking.
-The standard-library environment supplies the types and induction principles
-for the initial `List` lesson. The completed visual derivation is backed by an
-explicit induction proof term that the kernel checks independently.
+`src/kernel/checker.ts` owns capture-avoiding substitution, alpha-safe
+conversion, beta/delta/iota reduction, inference, checking, declaration
+validation, and inductive positivity. Inductive declarations are append-only.
+Constructor fields cannot escape the datatype's universe or contain a recursive
+occurrence outside a direct strictly-positive field. Recursor motives and every
+constructor branch are checked before elimination is accepted.
 
-The current trusted boundary includes those standard-library declarations.
-Moving list declarations behind checked strictly-positive inductive
-elaboration is the next kernel milestone; it is tracked explicitly rather
-than implied to be complete.
+The standard environment is constructed only through these checking paths.
+Programs such as negation, addition, append, map, reverse, and accumulator
+reverse are lambda terms over recursors. Their equations reduce by conversion.
+Equality combinators and reusable list theorems are ordinary checked proof terms.
+An inventory test ensures every global declaration is either generated
+inductive metadata or has a checked value.
 
-## Proof sessions
+## Exact visual certificates
 
-A `ProofSession` contains a theorem statement, local equality obligations,
-the focused obligation, a derivation transcript, and kernel status. Branching
-is represented as sibling obligations. Completing one focuses the next; the
-parent theorem becomes checked only after every obligation is solved and the
-complete proof term passes the kernel.
+The canvas AST is parsed into kernel terms by `src/proof/certificate.ts`.
+Definition reductions must pass definitional equality. A rewrite constructs
+congruence for the exact selected expression context and applies the chosen
+local equality. Case and induction branches are assembled into the registered
+datatype recursor. Generalized variables become `Π` binders in the motive and
+in recursive hypotheses.
 
-Move enumeration currently offers:
+A completed proof is certified only after the exact assembled term checks from
+an empty local context against the immutable lesson theorem. There is no
+separate hard-coded certificate for a lesson and no status bit is trusted when
+a saved document is restored.
 
-- case analysis or structural induction from datatype constructors;
-- one-step reduction through any matching definition clause;
-- occurrence-specific rewriting with the local induction hypothesis;
-- closure by reflexivity.
+## Scope and interaction
 
-Reduction and rewriting preserve ids outside the selected occurrence. The
-notebook view reads the same proof-session state as the visual view, so there
-is no second proof representation to synchronize.
+Every context variable occurring in a goal is a selectable expression. Its type
+determines its structural actions: finite datatypes offer cases, recursive
+datatypes additionally offer induction, and local variables offer
+generalization. Generalized binders are displayed as nested shaded boxes around
+their scope. A generalized induction hypothesis is matched by typed pattern
+instantiation, so it can be applied at a different accumulator or parameter.
 
-The interactive language is not implemented as one reducer per lesson.
-`src/proof/ast.ts` owns the shared parsed expression tree,
-`src/proof/definitions.ts` stores pattern-matching equations, and the generic
-reducer matches calls against those clauses. Move names and explanations come
-from the clause that matched. `src/proof/inductives.ts` likewise drives cases
-and recursive induction hypotheses from datatype metadata. Lesson specs contain
-starting goals and available prior lemmas, never a prescribed solution path.
+Definition and inductive cards are rendered from the same executable registries
+used by reduction and move generation. The visual, notebook, and proof-term
+views therefore cannot drift into separate proof representations.
 
-Canvas definition cards and the script view are printed from these same AST,
-definition, and inductive registries. They are executable declarations rather
-than duplicated explanatory text.
+## Browser boundary
 
-## Web boundary
-
-The Next.js route is the TypeScript backend for proof actions. The browser
-sends its current session and a move or focus id. The backend bounds document
-size, validates the session shape, re-enumerates legality, applies the move,
-and returns the next state plus its legal moves.
-
-Documents are stored locally and can be imported or exported as JSON. Imported
-documents are sent through the backend before becoming active. A later schema
-milestone will add explicit format versions and migrations.
+The backend recursively decodes imported JSON, restores immutable theorem
+metadata, replays legal transitions, checks the candidate term, and only then
+returns a new snapshot. Documents live in local storage and can be imported or
+exported. Undo and redo retain snapshots checked by the same in-browser kernel.
+No proof source, local context, or document is sent to the hosting Worker.
 
 ## Soundness rules
 
-1. UI affordances come only from `enumerateProofMoves`.
+1. UI affordances come only from generic move enumeration.
 2. Applying a move repeats legality checking.
-3. Reflexivity is offered only for structurally equal program expressions.
-4. A complete visual proof is not marked checked until its kernel proof term
-   checks against the theorem type.
-5. Automation may generate proof terms but never extend the kernel.
-6. Malformed, oversized, stale, or unknown proof actions fail without changing
-   the session.
+3. Every expression and local hypothesis is type-checked.
+4. Reduction closes only by kernel conversion.
+5. Rewriting constructs equality-elimination evidence for the selected context.
+6. Case analysis and induction construct an exhaustive checked recursor.
+7. Completion requires one closed proof term for the original theorem.
+8. The shipped environment contains no unchecked axioms.
+9. Malformed, oversized, stale, or unknown serialized data is rejected.

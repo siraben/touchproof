@@ -15,12 +15,14 @@ pedagogical ordering and exercise inspiration.
 | 6 | `map f (xs ++ ys) = map f xs ++ map f ys` | An invariant with fixed parameters | [Poly](https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html) |
 | 7 | `rev (xs ++ ys) = rev ys ++ rev xs` | Induction plus a reusable associativity lemma | [Lists](https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html) |
 | 8 | `rev (rev xs) = xs` | Reusing the previously proved reverse/append theorem | [Lists](https://softwarefoundations.cis.upenn.edu/current/lf-current/Lists.html) |
-| 9 | `map (f ∘ g) xs = map f (map g xs)` | Higher-order functions and local rewriting | [Poly](https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html) |
+| 9 | `revAcc xs acc = rev xs ++ acc` | Generalizing an accumulator before induction | [Induction](https://softwarefoundations.cis.upenn.edu/current/lf-current/Induction.html) |
+| 10 | `map (f ∘ g) xs = map f (map g xs)` | Higher-order functions and local rewriting | [Poly](https://softwarefoundations.cis.upenn.edu/current/lf-current/Poly.html) |
 
 The important transition is visible in the interface: concrete values reduce;
 unknown finite values require cases; unknown recursive values require
 induction; and larger proofs rely on earlier theorems as draggable rewrite
-cards. Each completed lesson has a separate proof term checked by the kernel.
+cards. Each completed lesson assembles its visible derivation into the exact
+closed proof term checked by the kernel.
 
 Planned definition-building exercises draw from `nandb`, `andb3`, `hd_error`,
 and fold/map exercises. They require the user-definition editor and checked

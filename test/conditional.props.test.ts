@@ -39,8 +39,6 @@ import {
   truthValue,
   variable,
   type Expr,
-  type Extension,
-  type Restriction,
 } from "../src/index.js";
 import {
   arbEnv,
@@ -72,7 +70,7 @@ describe("divide-both-sides (Restriction polarity)", () => {
           { divisor },
           "test-step",
         );
-        const r = after.assumptions.find((a) => a.kind === "restriction") as Restriction;
+        const r = after.assumptions.find((a) => a.kind === "restriction")!;
         expect(r).toBeDefined();
         expect(r.origin).toEqual({ kind: "rule", stepId: "test-step" });
         expect(invariantViolations(after.equation)).toEqual([]);
@@ -114,7 +112,7 @@ describe("multiplicative-cancellation (Restriction polarity)", () => {
           return;
         }
         const { judgment: after } = applyRule(j, multiplicativeCancellation, sc.loc, sc.params);
-        const r = after.assumptions.find((a) => a.kind === "restriction") as Restriction;
+        const r = after.assumptions.find((a) => a.kind === "restriction")!;
         expect(r).toBeDefined();
         expect(invariantViolations(after.equation)).toEqual([]);
         // Emission is unconditional; discharge resolves what is decidable.
@@ -166,7 +164,7 @@ describe("quotient-of-powers (Restriction polarity)", () => {
           return;
         }
         const { judgment: after } = applyRule(j, quotientOfPowers, sc.loc, sc.params);
-        const r = after.assumptions.find((a) => a.kind === "restriction") as Restriction;
+        const r = after.assumptions.find((a) => a.kind === "restriction")!;
         expect(r).toBeDefined();
         expect(invariantViolations(after.equation)).toEqual([]);
         assertConditionallyPreserved(sc.eqn, after, envs);
@@ -249,7 +247,7 @@ describe("multiply-both-sides (Extension polarity)", () => {
         const { judgment: after } = applyRule(mkJudgment(eqn), multiplyBothSides, eqn.id, {
           factor,
         });
-        const ext = after.assumptions.find((a) => a.kind === "extension") as Extension;
+        const ext = after.assumptions.find((a) => a.kind === "extension")!;
         expect(ext).toBeDefined();
         expect(ext.status).toBe("active"); // the obligation is open
         expect(ext.originalEquation).toBe(eqn); // carried for checkSolution
@@ -275,7 +273,7 @@ describe("square-both-sides (Extension polarity)", () => {
         if (v === undefined) return; // irrational sample — skip (surd-aware)
         const eqn = equation(lhs, rationalToExpr(v)); // env satisfies by construction
         const { judgment: after } = applyRule(mkJudgment(eqn), squareBothSides, eqn.id, {});
-        const ext = after.assumptions.find((a) => a.kind === "extension") as Extension;
+        const ext = after.assumptions.find((a) => a.kind === "extension")!;
         expect(ext).toBeDefined();
         expect(ext.status).toBe("active");
         expect(ext.originalEquation).toBe(eqn);
@@ -297,13 +295,13 @@ describe("square-both-sides (Extension polarity)", () => {
     // ...but the obligation routes it to the ORIGINAL equation.
     expect(d.checkSolution(minusTwo).verdict).toBe("extraneous");
     expect(
-      (d.current.assumptions.find((a) => a.kind === "extension") as Extension).status,
+      (d.current.assumptions.find((a) => a.kind === "extension")!).status,
     ).toBe("active");
 
     const two = new Map([["x", Rational.of(2)]]);
     expect(d.checkSolution(two).verdict).toBe("verified");
     expect(
-      (d.current.assumptions.find((a) => a.kind === "extension") as Extension).status,
+      (d.current.assumptions.find((a) => a.kind === "extension")!).status,
     ).toBe("discharged");
   });
 });
@@ -370,7 +368,7 @@ describe("checkSolution", () => {
         const { verdict } = d.checkSolution(candidate);
         expect(verdict).toBe(isTrueSolution ? "verified" : "extraneous");
 
-        const ext = d.current.assumptions.find((a) => a.kind === "extension") as Extension;
+        const ext = d.current.assumptions.find((a) => a.kind === "extension")!;
         expect(ext.status).toBe(isTrueSolution ? "discharged" : "active");
         if (isTrueSolution) expect(ext.dischargedBy).toBe("solution-check");
       }),
@@ -388,7 +386,7 @@ describe("checkSolution", () => {
     expect(truthValue(d.current.equation, five)).toBe(true);
     expect(d.checkSolution(five).verdict).toBe("extraneous");
     expect(
-      (d.current.assumptions.find((a) => a.kind === "extension") as Extension).status,
+      (d.current.assumptions.find((a) => a.kind === "extension")!).status,
     ).toBe("active");
     expect(d.currentNode.kind).toBe("check-solution"); // the condemnation is in the log
 
@@ -396,7 +394,7 @@ describe("checkSolution", () => {
     const three = new Map([["x", Rational.of(3)]]);
     expect(d.checkSolution(three).verdict).toBe("verified");
     expect(
-      (d.current.assumptions.find((a) => a.kind === "extension") as Extension).status,
+      (d.current.assumptions.find((a) => a.kind === "extension")!).status,
     ).toBe("discharged");
   });
 });

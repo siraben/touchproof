@@ -61,7 +61,7 @@ function idsOf(root: Equation): Set<NodeId> {
   return new Set([...allNodes(root)].map((n) => n.id));
 }
 
-function checkAfter(before: Equation, after: Equation): void {
+function checkAfter(after: Equation): void {
   expect(invariantViolations(after)).toEqual([]);
 }
 
@@ -227,7 +227,7 @@ describe("additive-cancellation", () => {
           sc.loc,
           params,
         );
-        checkAfter(sc.eqn, after);
+        checkAfter(after);
         expect(findById(after, sc.termA)).toBeUndefined();
         expect(findById(after, sc.termB)).toBeUndefined();
         expect(diff.removed).toContain(sc.termA);
@@ -350,7 +350,7 @@ describe("add-to-both-sides", () => {
     fc.assert(
       fc.property(arbEquation, arbExpr, (eqn, term) => {
         const { equation: after, diff } = addToBothSides.apply(mkJudgment(eqn), eqn.id, { term });
-        checkAfter(eqn, after);
+        checkAfter(after);
         expect(diff.removed).toEqual([]);
         expect(diff.created.length).toBeGreaterThan(0);
         const afterIds = idsOf(after);
@@ -420,7 +420,7 @@ describe("combine-integers", () => {
       fc.property(arbScenario, (sc) => {
         const params = { termA: sc.termA, termB: sc.termB };
         const { equation: after, diff } = combineIntegers.apply(mkJudgment(sc.eqn), sc.loc, params);
-        checkAfter(sc.eqn, after);
+        checkAfter(after);
         expect(diff.merged).toHaveLength(1);
         const folded = findById(after, diff.merged[0]!.target) as Expr | undefined;
         expect(literalValue(folded)).toBe(sc.expected);
@@ -510,7 +510,7 @@ describe("combine-integer-factors", () => {
           sc.loc,
           params,
         );
-        checkAfter(sc.eqn, after);
+        checkAfter(after);
         expect(diff.merged).toHaveLength(1);
         const folded = findById(after, diff.merged[0]!.target) as Expr | undefined;
         expect(literalValue(folded)).toBe(sc.expected);
@@ -543,7 +543,7 @@ describe("combine-integer-factors", () => {
         const j = mkJudgment(sc.eqn);
         expect(combineIntegerFactors.precondition(j, sc.loc, params)).toBe(true);
         const { equation: after, diff } = combineIntegerFactors.apply(j, sc.loc, params);
-        checkAfter(sc.eqn, after);
+        checkAfter(after);
         expect(findById(after, sc.loc)).toBeDefined();
         expect(diff.merged).toHaveLength(1);
         const folded = findById(after, diff.merged[0]!.target) as Expr | undefined;
@@ -1622,7 +1622,7 @@ describe("move-term-across", () => {
       fc.boolean(),
     )
     .map(([terms, idx, other, onLhs]) => {
-      const side: Expr = terms.length === 1 ? terms[0]! : (sum(terms) as Expr);
+      const side: Expr = terms.length === 1 ? terms[0]! : (sum(terms));
       const term = terms[idx % terms.length]!;
       const termId = terms.length === 1 ? side.id : term.id;
       const eqn = onLhs ? equation(side, other) : equation(other, side);
@@ -1680,7 +1680,7 @@ describe("move-term-across", () => {
 
     // Whole side: 2x = 4 moving the 2x ~> 0 = 4 − 2x.
     const lhs = product([int(2), variable("x")]);
-    const eqn3 = equation(lhs as Expr, int(4));
+    const eqn3 = equation(lhs, int(4));
     const r3 = moveTermAcross.apply(mkJudgment(eqn3), eqn3.id, { termId: lhs.id });
     expect(
       eq(
@@ -1693,7 +1693,7 @@ describe("move-term-across", () => {
   it("rejects non-top-level ids", () => {
     const two = int(2);
     const lhs = product([two, variable("x")]); // 2 is a factor, not a term
-    const eqn = equation(lhs as Expr, int(4));
+    const eqn = equation(lhs, int(4));
     expect(moveTermAcross.precondition(mkJudgment(eqn), eqn.id, { termId: two.id })).toBe(false);
   });
 });
