@@ -317,6 +317,7 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   background: var(--vellum-lo); border-right: 1px solid var(--vellum-edge); border-bottom: 1px solid var(--vellum-edge);
 }
 .move-palette button:hover .move-tip,
+.move-palette button.tip-open .move-tip,
 .move-palette button:focus-visible .move-tip { opacity: 1; visibility: visible; }
 
 /* --- Vellum canvas cards --------------------------------------------------------- */
@@ -586,9 +587,16 @@ h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -
   }
   .header-actions > button:not(.history-button):disabled { opacity: .35; }
 
-  /* --- Title strip: drop the procedure note, tighten padding --------------- */
-  .lesson-strip { grid-template-columns: 1fr auto; gap: 16px; padding: 18px 16px; }
+  /* --- Title strip: one compact row — the canvas owns the screen ------------ */
+  .topbar { height: 52px; padding: 0 12px; }
+  .brand small { display: none; }
+  .lesson-strip { display: flex; align-items: baseline; gap: 12px; padding: 8px 14px; }
+  .lesson-strip > div:first-child { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+  .lesson-strip .eyebrow { display: none; }
+  .lesson-strip h1 { margin: 0; font-size: var(--fs-lg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lesson-strip p { display: none; }
+  .progress { border-left: 0; padding-left: 0; flex: none; }
+  .progress strong { font-size: var(--fs-md); }
 
   /* --- Body: learning path becomes a horizontal strip, stage fills the rest.
      No dead space: the grid rows size to content (path) then 1fr (stage). --- */
