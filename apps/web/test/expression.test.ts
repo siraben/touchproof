@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseProgramExpr } from "@touchproof/core";
-import { Expression } from "../components/ProofWorkspace";
+import { Expression } from "../components/Expression";
 
 const markupOf = (source: string): string =>
   renderToStaticMarkup(createElement(Expression, {

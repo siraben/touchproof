@@ -49,6 +49,27 @@
   --serif-math: var(--font-math), "STIX Two Text", "Times New Roman", serif;
   --mono: var(--font-mono), "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
+  /* Type scale — a deliberate ladder replacing the ~12 ad-hoc literals.
+     Near-duplicates were collapsed: 13.3->13, 14->13, 16->15, 20/22->18,
+     28->26. Icon glyphs and labels reference the same rungs as body copy so
+     the rhythm stays consistent across the drafting board. */
+  --fs-2xs: 10px;   /* small-caps eyebrows, card notes, provenance */
+  --fs-xs: 11px;    /* dense labels, help text, badges */
+  --fs-sm: 12px;    /* sidebar body, definition code, scope labels */
+  --fs-base: 13px;  /* default body, chips, hints, notebook IH */
+  --fs-md: 15px;    /* notebook step math, next-lesson title */
+  --fs-lg: 18px;    /* action glyphs, history icons */
+  --fs-xl: 26px;    /* progress counter, Q.E.D. stamp */
+  --fs-2xl: 30px;   /* lesson title */
+  --fs-display: clamp(22px, 3vw, 38px); /* the hero equation */
+
+  /* Shared corner radii */
+  --radius-card: 13px;    /* floating canvas + hypothesis cards */
+  --radius-sheet: 16px;   /* the hero equation sheet + scope boxes */
+  --radius-popover: 15px; /* context menu, notebook/source cells */
+  --radius-chip: 12px;    /* move-palette chips, the view switch */
+  --radius-pill: 999px;
+
   /* Two-layer vellum shadows: crisp top edge light, deep soft drop below */
   --shadow-card: inset 0 1px 0 rgba(255, 255, 255, .55), 0 1px 2px rgba(4, 10, 18, .5), 0 12px 28px rgba(4, 10, 18, .38);
   --shadow-hero: inset 0 1px 0 rgba(255, 255, 255, .7), 0 2px 6px rgba(3, 8, 16, .45), 0 26px 60px rgba(3, 8, 16, .55);
@@ -78,55 +99,60 @@ button { font: inherit; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.02em; }
 .brand small { color: var(--muted); font-weight: 400; letter-spacing: 0; margin-left: 6px; }
 .brand-mark { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px 10px 10px 3px; background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--board-deep); border: 1px solid var(--vellum-edge); font-family: var(--serif-math); font-style: italic; box-shadow: 0 2px 8px rgba(3, 8, 16, .5); }
-.view-switch { display: flex; padding: 4px; border-radius: 12px; background: rgba(125, 211, 252, .08); border: 1px solid var(--hairline); }
+.view-switch { display: flex; padding: 4px; border-radius: var(--radius-chip); background: rgba(125, 211, 252, .08); border: 1px solid var(--hairline); }
 .view-switch button { border: 0; padding: 7px 18px; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; }
 .view-switch button.active { background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--ink); box-shadow: 0 2px 8px rgba(3, 8, 16, .4); }
-.kernel-badge { justify-self: end; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.kernel-badge { justify-self: end; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--fs-base); }
 /* Indicator lamp: brass while armed… */
 .kernel-badge span { width: 8px; height: 8px; border-radius: 50%; background: var(--brass); box-shadow: 0 0 0 3px rgba(217, 164, 65, .15), 0 0 10px rgba(217, 164, 65, .6); }
 /* …green glow once the kernel has checked this proof */
 .kernel-badge.checked { color: #7ee2a8; font-weight: 600; }
 .kernel-badge.checked span { background: var(--green-glow); box-shadow: 0 0 0 3px rgba(74, 222, 128, .15), 0 0 12px rgba(74, 222, 128, .65); }
 .header-actions { justify-self: end; display: flex; align-items: center; gap: 7px; }
-.header-actions > button { border: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; padding: 6px; }
+.header-actions > button { border: 0; background: transparent; color: var(--muted); font-size: var(--fs-sm); cursor: pointer; padding: 6px; }
 .header-actions > button:hover { color: var(--cyan); }
 .header-actions > button:disabled { opacity: .3; cursor: default; }
-.header-actions > .history-button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1px solid var(--hairline); border-radius: 8px; background: rgba(125, 211, 252, .06); color: var(--text); font-size: 16px; }
+.header-actions > .history-button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1px solid var(--hairline); border-radius: 8px; background: rgba(125, 211, 252, .06); color: var(--text); font-size: var(--fs-lg); }
 
 /* --- Lesson strip as an engineering title block ----------------------------- */
 .lesson-strip { display: grid; grid-template-columns: 1.3fr 1fr auto; gap: 40px; align-items: end; padding: 26px 40px 22px; border-bottom: 1px solid var(--hairline); background: #0e1a2b; }
-.eyebrow { color: var(--cyan); text-transform: uppercase; letter-spacing: .14em; font-size: 11px; font-weight: 700; }
-h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; color: var(--text); }
+.eyebrow { color: var(--cyan); text-transform: uppercase; letter-spacing: .14em; font-size: var(--fs-xs); font-weight: 700; }
+h1 { margin: 5px 0 0; font: 650 var(--fs-2xl)/1.1 var(--sans); letter-spacing: -.03em; color: var(--text); }
 .lesson-strip p { color: var(--muted); line-height: 1.55; margin: 0; max-width: 520px; border-left: 1px solid var(--hairline); padding-left: 28px; }
-.lesson-strip p::before { content: "Procedure"; display: block; margin-bottom: 4px; color: rgba(125, 211, 252, .75); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; }
+.lesson-strip p::before { content: "Procedure"; display: block; margin-bottom: 4px; color: rgba(125, 211, 252, .75); font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .14em; }
 .progress { display: flex; align-items: baseline; gap: 7px; border-left: 1px solid var(--hairline); padding-left: 28px; }
-.progress strong { font: 600 26px var(--sans); color: var(--text); font-variant-numeric: tabular-nums; }
-.progress span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; }
+.progress strong { font: 600 var(--fs-xl) var(--sans); color: var(--text); font-variant-numeric: tabular-nums; }
+.progress span { color: var(--muted); font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .14em; }
 
 /* --- Body grid & clipboard sidebar ------------------------------------------ */
 .body-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 215px minmax(0, 1fr); }
 .context-panel { padding: 20px 14px; border-right: 1px solid var(--hairline); background: var(--clipboard); overflow: auto; }
-.context-panel h2 { margin: 0 0 14px; font: 700 10px var(--sans); text-transform: uppercase; letter-spacing: .16em; color: var(--muted); }
+.context-panel h2 { margin: 0 0 14px; font: 700 var(--fs-2xs) var(--sans); text-transform: uppercase; letter-spacing: .16em; color: var(--muted); }
 .lesson-list { display: grid; gap: 6px; margin: 0 0 26px; }
 .lesson-list button { display: flex; gap: 9px; align-items: center; padding: 8px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--muted); text-align: left; cursor: pointer; }
-.lesson-list button > span { display: grid; place-items: center; flex: 0 0 25px; height: 25px; border-radius: 50%; background: rgba(125, 211, 252, .1); font-size: 11px; }
+.lesson-list button > span { display: grid; place-items: center; flex: 0 0 25px; height: 25px; border-radius: 50%; background: rgba(125, 211, 252, .1); font-size: var(--fs-xs); }
 .lesson-list button strong, .lesson-list button small { display: block; }
-.lesson-list button strong { color: inherit; font-size: 12px; }
-.lesson-list button small { margin-top: 2px; font-size: 10px; }
+.lesson-list button strong { color: inherit; font-size: var(--fs-sm); }
+.lesson-list button small { margin-top: 2px; font-size: var(--fs-2xs); }
 .lesson-list button.active { border-color: rgba(125, 211, 252, .4); background: rgba(125, 211, 252, .08); color: var(--text); }
 .lesson-list button.active > span { background: var(--cyan); color: var(--board-deep); font-weight: 700; }
-.lesson-source { display: block; margin: 13px 2px 0; color: var(--muted); font-size: 10px; line-height: 1.4; text-decoration: none; }
+.lesson-source { display: block; margin: 13px 2px 0; color: var(--muted); font-size: var(--fs-2xs); line-height: 1.4; text-decoration: none; }
 .lesson-source:hover { color: var(--cyan); }
 .why-card { margin-top: 22px; border-top: 1px solid var(--hairline); padding-top: 18px; }
-.why-card span { font-size: 12px; font-weight: 700; color: var(--cyan); }
-.why-card p { margin: 7px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.why-card span { font-size: var(--fs-sm); font-weight: 700; color: var(--cyan); }
+.why-card p { margin: 7px 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
 
 /* --- The drafting board ------------------------------------------------------
    Blueprint grid at two densities (20px minor / 100px major) under a radial
    vignette so the board reads as a lit desk. The vignette stays with the
    viewport; the gridlines scroll with the drawing (background-attachment). */
 .proof-stage {
-  position: relative; padding: 18px 20px 40px; overflow: auto;
+  position: relative; padding: 18px 20px 24px; overflow: auto;
+  /* Size container for the canvas density switches: the layout responds to the
+     stage's own box, not the viewport, so a constrained ancestor makes tight
+     mode testable. Full size containment is safe because the stage's height
+     comes from the flex column (100vh minus chrome), never from content. */
+  container: proof-stage / size;
   background-color: var(--board);
   background-image:
     radial-gradient(120% 90% at 50% 12%, rgba(125, 211, 252, .06), rgba(3, 8, 16, 0) 46%, rgba(3, 8, 16, .5) 100%),
@@ -138,7 +164,7 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
   background-attachment: scroll, local, local, local, local;
 }
 .obligation-tabs { display: flex; justify-content: center; gap: 8px; margin-bottom: 48px; }
-.obligation-tabs button { border: 1px solid var(--hairline); border-radius: 999px; padding: 7px 13px 7px 8px; background: rgba(21, 36, 56, .85); color: var(--muted); cursor: pointer; }
+.obligation-tabs button { border: 1px solid var(--hairline); border-radius: var(--radius-pill); padding: 7px 13px 7px 8px; background: rgba(21, 36, 56, .85); color: var(--muted); cursor: pointer; }
 .obligation-tabs button span { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 7px; border-radius: 50%; background: rgba(125, 211, 252, .12); }
 .obligation-tabs button.active { border-color: var(--vellum-edge); background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--ink); box-shadow: 0 4px 16px rgba(3, 8, 16, .45); }
 .obligation-tabs button.active span { background: rgba(11, 110, 151, .12); color: var(--cyan-ink); }
@@ -146,30 +172,54 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
 .obligation-tabs button.solved span { background: transparent; border: 1.5px solid var(--stamp-bright); color: var(--stamp-bright); transform: rotate(-8deg); font-weight: 700; }
 .obligation-tabs button.active.solved span { border-color: var(--stamp); color: var(--stamp); }
 
-/* --- Visual view geometry (structural — do not change) -----------------------
-   min-width reserves gutters so the centered 660px equation card keeps >=330px
-   clearance on each side (660 + 2*330 = 1320) and never slides under the
-   floating side cards: ~272px left context card, ~309px right definition column.
-   padding-bottom reserves the bottom-center band for the move palette: flow
-   content stops above it, and because the container grows with its flow
-   content the palette can never collide with the equation card or hint. */
-.visual-view { position: relative; min-width: 1320px; min-height: 780px; margin: 0 auto; padding-bottom: 280px; text-align: center; }
+/* --- Visual view geometry (fluid three-region layout) ------------------------
+   No fixed min-width any more. Two side rails hold the floating cards; the
+   equation flow is centered in whatever remains. The rail width and every
+   density knob are container-query driven (see the @container blocks below),
+   so the board fits the stage down to ~1050px of content width without
+   horizontal scrolling.
+
+   --rail        reserved gutter each side; the floating cards live inside it.
+   --def-card-w  right-rail definition/inductive card width.
+   --ctx-card-w  left-rail context card width.
+   --def-row-gap vertical slot per right-rail card (tightens when collapsed).
+   --palette-reserve  bottom band kept clear for the move palette.
+   --eq-min-height / --eq-pad / --eq-fs  the hero equation sheet in each mode. */
+.visual-view {
+  position: relative; margin: 0 auto; text-align: center;
+  /* Roomy defaults (stage content >= ~1180px). */
+  --rail: clamp(300px, 22cqw, 340px);
+  --def-card-w: 285px;
+  --ctx-card-w: 250px;
+  --def-row-gap: 150px;
+  --palette-reserve: 280px;
+  --eq-min-height: 170px;
+  --eq-pad: 42px 34px;
+  --eq-fs: var(--fs-display);
+  min-height: 600px;
+  padding-bottom: var(--palette-reserve);
+}
 /* Keep the centered flow (case label, equation card, hint) above the grid but
-   still centered; the min-width guarantees it clears the floating side cards. */
+   still centered inside the free band between the two rails. */
 .visual-view > .case-label,
 .visual-view > .scope-box,
 .visual-view > .equation-card,
-.visual-view > .gesture-hint { position: relative; z-index: 1; max-width: 660px; margin-left: auto; margin-right: auto; }
-/* The equation expands before it breaks: it may grow into the whole center
-   band (100% minus both 330px gutters, so it always clears the side card
-   columns) but is capped at 1000px for readable line lengths. */
+.visual-view > .gesture-hint { position: relative; z-index: 1; margin-left: auto; margin-right: auto; }
+/* The equation expands before it breaks: it grows into the free center band
+   (100cqw minus both rails and two 28px breathing gutters) but is capped at
+   1000px for readable line lengths and floored so it never collapses. */
 .visual-view > .equation-card,
-.visual-view > .scope-box { width: fit-content; max-width: clamp(660px, calc(100% - 660px), 1000px); }
+.visual-view > .scope-box {
+  width: fit-content;
+  max-width: clamp(340px, calc(100cqw - 2 * var(--rail) - 56px), 1000px);
+}
 .scope-box .equation-card { max-width: 100%; }
-.case-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .14em; font-weight: 700; }
+.case-label { color: var(--muted); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .14em; font-weight: 700; }
 
-/* --- The hero sheet: equation card ------------------------------------------- */
-.equation-card { position: relative; width: fit-content; max-width: 660px; margin: 28px auto; min-height: 170px; padding: 42px 34px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 28px; border: 1px solid var(--vellum-edge); border-radius: 16px; background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); box-shadow: var(--shadow-hero); color: var(--ink); font: clamp(23px, 3vw, 38px)/1.55 var(--serif-math); font-style: italic; transition: opacity .2s, transform .2s; }
+/* --- The hero sheet: equation card -------------------------------------------
+   Min-height, padding and font all read from the --eq-* knobs so tight mode can
+   step them down (see @container) without touching the wrapping rules. */
+.equation-card { position: relative; width: fit-content; max-width: 100%; margin: 28px auto; min-height: var(--eq-min-height, 170px); padding: var(--eq-pad, 42px 34px); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 28px; border: 1px solid var(--vellum-edge); border-radius: var(--radius-sheet); background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); box-shadow: var(--shadow-hero); color: var(--ink); font: var(--eq-fs, var(--fs-display))/1.55 var(--serif-math); font-style: italic; transition: opacity .2s, transform .2s; }
 .equation-card.busy { opacity: .55; transform: scale(.995); }
 /* Faint corner registration marks, like a drafting sheet */
 .equation-card::before, .equation-card::after { content: ""; position: absolute; width: 15px; height: 15px; pointer-events: none; opacity: .45; }
@@ -184,7 +234,7 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
 
 /* Q.E.D. — vermilion rubber stamp; ink bleed via the alpha-noise mask.
    Mounts when the last obligation closes, so stamp-in plays exactly once. */
-.qed-stamp { position: absolute; top: -26px; right: -22px; z-index: 6; pointer-events: none; transform: rotate(-8deg); padding: 8px 20px 9px; border: 2px solid var(--stamp); border-radius: 8px; color: var(--stamp); font: 800 28px/1 var(--sans); font-style: normal; letter-spacing: .06em; -webkit-mask-image: var(--ink-bleed); mask-image: var(--ink-bleed); animation: stamp-in .5s cubic-bezier(.16, 1.3, .3, 1) both; }
+.qed-stamp { position: absolute; top: -26px; right: -22px; z-index: 6; pointer-events: none; transform: rotate(-8deg); padding: 8px 20px 9px; border: 2px solid var(--stamp); border-radius: 8px; color: var(--stamp); font: 800 var(--fs-xl)/1 var(--sans); font-style: normal; letter-spacing: .06em; -webkit-mask-image: var(--ink-bleed); mask-image: var(--ink-bleed); animation: stamp-in .5s cubic-bezier(.16, 1.3, .3, 1) both; }
 .qed-stamp::before { content: ""; position: absolute; inset: 3px; border: 1px solid var(--stamp); border-radius: 5px; }
 @keyframes stamp-in {
   from { opacity: 0; transform: rotate(-8deg) scale(2.3); }
@@ -208,66 +258,97 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
 .operator, .paren { color: #5f5a4a; font-style: normal; }
 .function-name { font-style: normal; color: #1f4e46; }
 .argument { margin-left: .24em; }
-.gesture-hint { display: inline-flex; gap: 10px; align-items: center; color: var(--muted); font-size: 13px; }
+.gesture-hint { display: inline-flex; gap: 10px; align-items: center; color: var(--muted); font-size: var(--fs-base); }
 .cursor-icon { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: rgba(125, 211, 252, .14); border: 1px solid var(--hairline); color: var(--cyan); }
 
 /* --- Context menu (vellum popover) --------------------------------------------- */
-.context-menu { position: fixed; z-index: 50; width: min(390px, 92vw); transform: translate(10px, 10px); padding: 8px; border: 1px solid var(--vellum-edge); border-radius: 15px; background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); box-shadow: var(--shadow); text-align: left; color: var(--ink); animation: menu-in .12s ease both; }
+.context-menu { position: fixed; z-index: 50; width: min(390px, 92vw); transform: translate(10px, 10px); padding: 8px; border: 1px solid var(--vellum-edge); border-radius: var(--radius-popover); background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); box-shadow: var(--shadow); text-align: left; color: var(--ink); animation: menu-in .12s ease both; }
 .context-menu::before { content: ""; position: absolute; left: 12px; top: -7px; width: 12px; height: 12px; transform: rotate(45deg); border-left: 1px solid var(--vellum-edge); border-top: 1px solid var(--vellum-edge); background: var(--vellum-hi); }
 @keyframes menu-in { from { opacity: 0; } to { opacity: 1; } }
-.context-menu-title { padding: 6px 9px 8px; color: var(--ink-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
+.context-menu-title { padding: 6px 9px 8px; color: var(--ink-muted); font-size: var(--fs-2xs); font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
 .context-menu button { width: 100%; display: flex; gap: 11px; align-items: flex-start; padding: 10px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .context-menu button:hover, .context-menu button:focus-visible { outline: none; background: var(--cyan-wash); }
-.context-menu button > span { color: var(--cyan-ink); font-size: 20px; }
+.context-menu button > span { color: var(--cyan-ink); font-size: var(--fs-lg); }
 .context-menu strong, .context-menu small { display: block; }
 .context-menu small { margin-top: 3px; color: var(--ink-muted); line-height: 1.35; }
-.context-menu p { margin: 5px 10px 4px; color: var(--ink-muted); font-size: 10px; }
+.context-menu p { margin: 5px 10px 4px; color: var(--ink-muted); font-size: var(--fs-2xs); }
 
-/* --- Move palette (structural position — do not change) ------------------------
-   Bottom-CENTER band, two ~250px chips per row (507px content in a 520px box).
-   At the 1320px canvas minimum it spans x 400-920: clear of the canvas-help
-   (ends x 332), the left context card (ends x 272), and the right definition
-   column (starts x 1011), so it never shares a lane with the floating cards.
-   The max-height + scroll is a fallback for unusually long move lists. */
-.move-palette { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4; display: grid; grid-template-columns: repeat(2, 250px); justify-content: center; align-items: stretch; gap: 7px; width: 520px; max-height: 244px; overflow-y: auto; margin: 0; text-align: left; }
-.move-palette button { display: flex; gap: 11px; align-items: flex-start; padding: 12px; border: 1px solid var(--vellum-edge); border-radius: 12px; background: var(--grain), linear-gradient(180deg, rgba(251, 247, 234, .97), rgba(239, 230, 207, .97)); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-card); transition: transform .16s, border-color .16s, box-shadow .16s; }
+/* --- Move palette (bottom-center band) -----------------------------------------
+   Compact chips: icon + label on a single row so every action is visible at
+   once. The explanation lives in an instant themed tooltip (.move-tip) that
+   pops ABOVE the chip on hover/focus. The palette is anchored to the bottom of
+   the stage with the equation flow well above it, so "above" always has room —
+   no flip measurement needed, and overflow is visible so tips never clip.
+   overflow only becomes scroll (with a slightly taller reserve) for the rare
+   over-long move list; see the tight-mode @container block. */
+.move-palette { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 4; display: grid; grid-template-columns: repeat(2, 250px); justify-content: center; align-items: stretch; gap: 7px; width: 520px; overflow: visible; margin: 0; text-align: left; }
+.move-palette button { position: relative; display: flex; gap: 10px; align-items: center; padding: 9px 13px; border: 1px solid var(--vellum-edge); border-radius: var(--radius-chip); background: var(--grain), linear-gradient(180deg, rgba(251, 247, 234, .97), rgba(239, 230, 207, .97)); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-card); transition: transform .16s, border-color .16s, box-shadow .16s; }
 .move-palette button:hover { border-color: var(--cyan-strong); transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 1px 2px rgba(4, 10, 18, .5), 0 16px 32px rgba(4, 10, 18, .5); }
-.move-palette button > span { color: var(--cyan-ink); font-size: 20px; }
-.move-palette strong, .move-palette small { display: block; }
-.move-palette strong { font-size: 13px; }
-.move-palette small { color: var(--ink-muted); line-height: 1.35; margin-top: 3px; }
+.move-palette button > span:first-child { color: var(--cyan-ink); font-size: var(--fs-lg); flex: 0 0 auto; line-height: 1; }
+.move-palette .move-chip strong { font-size: var(--fs-base); font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Instant themed tooltip: vellum sheet, ink text, drafting shadow + a little
+   arrow, revealed with no transition-delay on hover OR keyboard focus. It sits
+   above the chip; a scrolling container would clip it, but the palette keeps
+   overflow visible in every normal case. */
+.move-tip {
+  position: absolute; left: 50%; bottom: calc(100% + 9px); z-index: 60;
+  width: max-content; max-width: 260px; transform: translateX(-50%);
+  padding: 8px 11px; border: 1px solid var(--vellum-edge); border-radius: 10px;
+  background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo));
+  box-shadow: var(--shadow); color: var(--ink-muted);
+  font-size: var(--fs-sm); font-weight: 400; line-height: 1.4; text-align: left;
+  pointer-events: none; opacity: 0; visibility: hidden;
+}
+.move-tip::after {
+  content: ""; position: absolute; left: 50%; top: 100%; width: 11px; height: 11px;
+  transform: translateX(-50%) translateY(-6px) rotate(45deg);
+  background: var(--vellum-lo); border-right: 1px solid var(--vellum-edge); border-bottom: 1px solid var(--vellum-edge);
+}
+.move-palette button:hover .move-tip,
+.move-palette button:focus-visible .move-tip { opacity: 1; visibility: visible; }
 
 /* --- Vellum canvas cards --------------------------------------------------------- */
-.canvas-card { position: absolute; z-index: 3; width: 250px; border: 1px solid var(--vellum-edge); border-radius: 13px; background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); box-shadow: var(--shadow-card); text-align: left; overflow: hidden; color: var(--ink); }
-.canvas-card-handle { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-bottom: 1px solid #ded3b6; background: linear-gradient(180deg, #f3ecd9, #ece2ca); color: #5d5744; font-size: 11px; font-weight: 800; cursor: grab; touch-action: none; user-select: none; }
+.canvas-card { position: absolute; z-index: 3; width: var(--ctx-card-w, 250px); border: 1px solid var(--vellum-edge); border-radius: var(--radius-card); background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); box-shadow: var(--shadow-card); text-align: left; overflow: hidden; color: var(--ink); }
+.canvas-card-handle { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-bottom: 1px solid #ded3b6; background: linear-gradient(180deg, #f3ecd9, #ece2ca); color: #5d5744; font-size: var(--fs-xs); font-weight: 800; cursor: grab; touch-action: none; user-select: none; }
 .canvas-card-handle:active { cursor: grabbing; background: #e8ddc2; }
-.canvas-card-handle span { color: var(--cyan-ink); font-size: 15px; }
+.canvas-card-handle > span { color: var(--cyan-ink); font-size: var(--fs-md); }
 .canvas-card-body { padding: 11px; }
-.definition-canvas-card { width: 285px; }
-.definition-canvas-card code { display: block; padding: 4px 2px; color: #29483f; font: 12px/1.35 var(--mono); white-space: pre; }
-.definition-canvas-card small, .context-canvas-card small { display: block; margin-top: 8px; color: var(--ink-muted); font-size: 10px; line-height: 1.4; }
+/* Right-rail definition/inductive sheets: width from a var so tight mode can
+   shrink them, and an undragged card's top derives from --card-index * the
+   row gap, so collapsing a card lets the whole column ride up in tight mode. */
+.definition-canvas-card { width: var(--def-card-w, 285px); top: calc(72px + var(--card-index, 0) * var(--def-row-gap, 150px)); }
+.definition-canvas-card code { display: block; padding: 4px 2px; color: #29483f; font: var(--fs-sm)/1.35 var(--mono); white-space: pre; }
+.definition-canvas-card small, .context-canvas-card small { display: block; margin-top: 8px; color: var(--ink-muted); font-size: var(--fs-2xs); line-height: 1.4; }
+/* Collapsible header: name/type-signature title truncates, chevron toggles. */
+.definition-card-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.definition-card-toggle { flex: 0 0 auto; margin-left: auto; border: 0; padding: 0 2px; background: transparent; color: var(--cyan-ink); font-size: var(--fs-sm); line-height: 1; cursor: pointer; }
+/* Roomy mode: cards are always expanded, so the chevron is decorative-only and
+   hidden; the body always shows. Tight mode (@container) reveals the chevron
+   and collapses .is-collapsed bodies to the header alone. */
+.definition-canvas-card .definition-card-toggle { display: none; }
 .context-list { display: grid; gap: 7px; }
-.context-list code { padding: 8px 10px; border-radius: 8px; background: rgba(34, 48, 44, .07); font: 13px var(--mono); }
-.hypothesis-card { margin-top: 20px; padding: 14px; border: 1px solid var(--mint-line); border-radius: 13px; background: var(--mint); cursor: grab; box-shadow: 0 5px 18px rgba(23, 107, 77, .14); }
-.hypothesis-card > span { display: inline-block; padding: 2px 7px; border-radius: 5px; background: var(--green); color: white; font-size: 11px; font-weight: 800; }
-.hypothesis-card div { margin: 10px 0 8px; font: italic 13px/1.5 var(--serif-math); }
+.context-list code { padding: 8px 10px; border-radius: 8px; background: rgba(34, 48, 44, .07); font: var(--fs-base) var(--mono); }
+.hypothesis-card { margin-top: 20px; padding: 14px; border: 1px solid var(--mint-line); border-radius: var(--radius-card); background: var(--mint); cursor: grab; box-shadow: 0 5px 18px rgba(23, 107, 77, .14); }
+.hypothesis-card > span { display: inline-block; padding: 2px 7px; border-radius: 5px; background: var(--green); color: white; font-size: var(--fs-xs); font-weight: 800; }
+.hypothesis-card div { margin: 10px 0 8px; font: italic var(--fs-base)/1.5 var(--serif-math); }
 .hypothesis-card small { color: var(--green); }
 .induction-zone { margin-top: 20px; min-height: 105px; display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 15px; border: 2px dashed #a89e83; border-radius: 14px; color: var(--ink-muted); transition: .2s; }
 .induction-zone:hover { border-color: var(--cyan-ink); background: rgba(11, 110, 151, .07); }
 .induction-zone strong { color: var(--ink); }
-.induction-zone span { font-size: 13px; line-height: 1.45; }
+.induction-zone span { font-size: var(--fs-base); line-height: 1.45; }
 
 /* --- Scope boxes: blueprint annotations on the board ------------------------------ */
-.scope-box { position: relative; margin: 14px 0; padding: 28px 14px 14px; border: 1px solid rgba(125, 211, 252, .3); border-radius: 16px; background: rgba(125, 211, 252, .05); box-shadow: inset 3px 0 0 rgba(125, 211, 252, .28); }
+.scope-box { position: relative; margin: 14px 0; padding: 28px 14px 14px; border: 1px solid rgba(125, 211, 252, .3); border-radius: var(--radius-sheet); background: rgba(125, 211, 252, .05); box-shadow: inset 3px 0 0 rgba(125, 211, 252, .28); }
 .scope-box .scope-box { margin: 8px 0 0; }
-.scope-label { position: absolute; top: 7px; left: 12px; display: flex; align-items: baseline; gap: 7px; color: #8fc7e8; font: 700 12px/1.2 var(--mono); }
-.scope-label span { color: var(--muted); font: 600 10px/1.2 var(--sans); text-transform: uppercase; letter-spacing: .08em; }
+.scope-label { position: absolute; top: 7px; left: 12px; display: flex; align-items: baseline; gap: 7px; color: #8fc7e8; font: 700 var(--fs-sm)/1.2 var(--mono); }
+.scope-label span { color: var(--muted); font: 600 var(--fs-2xs)/1.2 var(--sans); text-transform: uppercase; letter-spacing: .08em; }
 /* Inside vellum notebook cells the annotation switches to cyan ink */
 .proof-cell .scope-box { border-color: rgba(11, 110, 151, .3); background: rgba(11, 110, 151, .05); box-shadow: inset 3px 0 0 rgba(11, 110, 151, .25); }
 .proof-cell .scope-label { color: var(--cyan-ink); }
 .proof-cell .scope-label span { color: var(--ink-muted); }
 
-.canvas-help { position: absolute; left: 22px; bottom: 18px; z-index: 2; display: flex; flex-direction: column; gap: 3px; max-width: 310px; padding: 9px 12px; border: 1px solid var(--hairline); border-radius: 10px; background: rgba(13, 24, 40, .85); color: #b7cde2; text-align: left; font-size: 11px; }
+.canvas-help { position: absolute; left: 22px; bottom: 18px; z-index: 2; display: flex; flex-direction: column; gap: 3px; max-width: 310px; padding: 9px 12px; border: 1px solid var(--hairline); border-radius: 10px; background: rgba(13, 24, 40, .85); color: #b7cde2; text-align: left; font-size: var(--fs-xs); }
 .canvas-help strong { color: var(--cyan); }
 
 /* --- Lesson-load reveal -------------------------------------------------------------
@@ -298,26 +379,26 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
 
 /* --- Notebook: vellum sheets on the board -------------------------------------------- */
 .notebook-view { max-width: 830px; margin: 0 auto; text-align: left; }
-.source-cell, .proof-cell { background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); border: 1px solid var(--vellum-edge); border-radius: 15px; box-shadow: var(--shadow-card); color: var(--ink); }
-.source-cell { padding: 20px 24px; font: 14px/1.75 var(--mono); white-space: pre-wrap; }
+.source-cell, .proof-cell { background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); border: 1px solid var(--vellum-edge); border-radius: var(--radius-popover); box-shadow: var(--shadow-card); color: var(--ink); }
+.source-cell { padding: 20px 24px; font: var(--fs-base)/1.75 var(--mono); white-space: pre-wrap; }
 .proof-cell { margin-top: 14px; overflow: hidden; }
 .proof-cell header { padding: 12px 17px; border-bottom: 1px solid #e2d9c0; font-weight: 700; }
 .proof-cell header span { color: var(--green); margin-right: 8px; }
-.notebook-ih { margin: 14px 18px 0; padding: 9px 11px; border-radius: 8px; background: var(--mint); color: var(--green); font: 12px var(--mono); }
+.notebook-ih { margin: 14px 18px 0; padding: 9px 11px; border-radius: 8px; background: var(--mint); color: var(--green); font: var(--fs-sm) var(--mono); }
 .notebook-step { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: baseline; padding: 12px 18px; border-bottom: 1px solid #e8dfc7; }
 .notebook-step:last-child { border-bottom: 0; }
-.notebook-step code { font: italic 15px/1.5 var(--serif-math); }
+.notebook-step code { font: italic var(--fs-md)/1.5 var(--serif-math); }
 .notebook-step small { color: var(--ink-muted); }
 
 /* --- Script view ------------------------------------------------------------------------ */
 .script-view { max-width: 900px; margin: 8px auto 60px; text-align: left; }
-.script-caption { display: inline-block; padding: 5px 9px; border-radius: 8px 8px 0 0; background: #10293d; border: 1px solid var(--hairline); border-bottom: 0; color: var(--cyan); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
-.script-view pre { margin: 0; padding: 24px; overflow: auto; border: 1px solid var(--hairline); border-radius: 0 14px 14px 14px; background: #0d1826; color: #dbe9f4; box-shadow: var(--shadow); font: 13px/1.65 var(--mono); }
-.script-view p { color: var(--muted); font-size: 11px; }
+.script-caption { display: inline-block; padding: 5px 9px; border-radius: 8px 8px 0 0; background: #10293d; border: 1px solid var(--hairline); border-bottom: 0; color: var(--cyan); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .1em; }
+.script-view pre { margin: 0; padding: 24px; overflow: auto; border: 1px solid var(--hairline); border-radius: 0 14px 14px 14px; background: #0d1826; color: #dbe9f4; box-shadow: var(--shadow); font: var(--fs-base)/1.65 var(--mono); }
+.script-view p { color: var(--muted); font-size: var(--fs-xs); }
 
 /* --- Toasts & loading --------------------------------------------------------------------- */
 .error-toast { position: fixed; right: 24px; bottom: 24px; padding: 13px 17px; border-radius: 11px; background: #7c2717; color: #fff2ec; box-shadow: var(--shadow); }
-.checking-toast { position: fixed; right: 24px; bottom: 24px; z-index: 80; padding: 13px 17px; border: 1px solid var(--mint-line); border-radius: 11px; background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--green); box-shadow: var(--shadow); font-size: 13px; font-weight: 700; }
+.checking-toast { position: fixed; right: 24px; bottom: 24px; z-index: 80; padding: 13px 17px; border: 1px solid var(--mint-line); border-radius: 11px; background: linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); color: var(--green); box-shadow: var(--shadow); font-size: var(--fs-base); font-weight: 700; }
 .loading { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); background: var(--board-deep); }
 .loading p { max-width: 580px; text-align: center; line-height: 1.55; }
 .loading button { border: 1px solid var(--hairline); border-radius: 9px; padding: 9px 16px; background: var(--board-raised); color: var(--text); cursor: pointer; }
@@ -345,8 +426,13 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
    The palette is empty once every obligation closes; the next-lesson chip
    takes its place and carries the flow forward. */
 .move-palette .next-lesson { grid-column: 1 / -1; justify-self: center; width: 330px; align-items: center; border-color: var(--cyan-strong); box-shadow: var(--shadow-card), 0 0 0 1px rgba(56, 189, 248, .35), 0 0 26px rgba(56, 189, 248, .28); }
-.move-palette .next-lesson > span { color: var(--cyan-ink); font-size: 22px; }
-.move-palette .next-lesson strong { font-size: 15px; }
+.move-palette .next-lesson > span { color: var(--cyan-ink); font-size: var(--fs-lg); }
+.move-palette .next-lesson strong { font-size: var(--fs-md); }
+/* The next-lesson chip keeps its two-line body (icon + title + subtitle), so it
+   opts back out of the compact single-row chip layout. */
+.move-palette .next-lesson { display: flex; gap: 11px; }
+.move-palette .next-lesson > div { display: block; }
+.move-palette .next-lesson small { display: block; margin-top: 3px; color: var(--ink-muted); line-height: 1.35; font-size: var(--fs-sm); }
 
 
 /* --- Context menu flipped above its anchor -------------------------------------------------------- */
@@ -363,6 +449,65 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
 .context-list code.preview-target,
 .hypothesis-card.preview-target { box-shadow: 0 0 0 2px rgba(56, 189, 248, .55), 0 0 16px rgba(56, 189, 248, .35); animation: preview-shimmer 1.6s ease-in-out infinite; }
 .induction-zone.preview-dest { border-color: var(--cyan-strong); background: rgba(56, 189, 248, .1); box-shadow: 0 0 16px rgba(56, 189, 248, .25); }
+
+/* --- Canvas density: roomy vs. tight (container-query driven) -------------------
+   The density switch keys off the .proof-stage container inline size, not the
+   viewport, so constraining any ancestor's width flips the layout — which is
+   how tight mode is tested. Roomy is the default declared on .visual-view; the
+   @container block below overrides the knobs when the stage is narrow.
+
+   ROOMY fit (stage content >= ~1180px, e.g. a 1440x900 window -> ~1225px):
+     rail   = clamp(300px, 22cqw, 340px)        (>=300px)
+     eq band= 100cqw - 2*rail - 56  -> centered, capped 1000px
+     right rail footprint = 24 + 285 = 309 <= 300..340 rail  (clears the band)
+     def cards render fully expanded (chevron hidden, body always shown).
+
+   In roomy mode definition cards are always open regardless of toggle state. */
+.definition-canvas-card .canvas-card-body { display: block; }
+
+@container proof-stage ((width < 1180px) or (height < 820px)) {
+  /* TIGHT fit (worst case a 1280x800 window -> stage content ~1065px):
+       --rail        = clamp(268px, 23cqw, 300px) -> 268px at 1065cqw
+       eq band       = 1065 - 2*268 - 56 = 473px, centered [296..769]
+       right card    left edge = 1065 - 24 - 236 = 805px  (>= 769, clears band)
+       left card     right edge = 22 + 224 = 246px         (<= 296, clears band)
+       column height = 72 + (5-1)*48 + 36 = 300px          (fits ~600px stage)
+       palette (7 moves, 2 cols) = 4 rows * 40 + 3*7 = 181px < 200px reserve. */
+  .visual-view {
+    --rail: clamp(268px, 23cqw, 300px);
+    --def-card-w: 236px;
+    --ctx-card-w: 224px;
+    --def-row-gap: 48px;
+    --palette-reserve: 172px;
+    --eq-min-height: 108px;
+    --eq-pad: 22px 22px;
+    --eq-fs: clamp(20px, 2.4cqw, 30px);
+    min-height: 408px;
+  }
+  .obligation-tabs { margin-bottom: 10px; }
+  .visual-view > .equation-card,
+  .visual-view > .scope-box { margin-top: 10px; margin-bottom: 10px; }
+  .visual-view > .gesture-hint { margin-top: 6px; }
+  /* The "why this move?" copy now lives in the compact chips' tooltips, so the
+     bottom-left help box (which would collide with a tall context card) is
+     dropped in tight mode to reclaim the column. */
+  .canvas-help { display: none; }
+
+  /* Collapsible definition cards: chevron appears; a collapsed card is just its
+     header (~37px). An expanded card's body overlays downward with a raised
+     z-index, so expanding one never shifts the fixed-slot column below it. */
+  .definition-canvas-card .definition-card-toggle { display: inline-block; }
+  .definition-canvas-card.is-collapsed .canvas-card-body { display: none; }
+  .definition-canvas-card.is-open { z-index: 5; }
+
+  /* Compact chips: a touch tighter so a 4-row (7-move) palette clears ~170px. */
+  .move-palette button { padding: 7px 12px; }
+
+  /* Compact palette stays overflow:visible so the above-chip tooltips escape
+     (a scrolling container would clip them — the exact trap called out). The
+     worst-case 7 moves fit the 200px reserve without needing internal scroll;
+     an unusually long list simply lets the stage scroll as a last resort. */
+}
 
 /* --- Themed scrollbars ------------------------------------------------------------------------------
    Standard properties first; ::-webkit-* for older Chromium. Slate-cyan
