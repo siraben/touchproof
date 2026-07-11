@@ -563,25 +563,19 @@ export function revInvolutionProof(): { readonly type: Term; readonly term: Term
 
 export function verifyLessonProof(lessonId: string): void {
   const environment = touchProofEnvironment();
-  const theorem = lessonId === "bool-involution"
-    ? booleanInvolutionProof()
-    : lessonId === "bool-compute"
-      ? booleanComputationProof()
-      : lessonId === "nat-add-example"
-        ? natAdditionExampleProof()
-        : lessonId === "nat-add-zero"
-          ? addZeroRightProof()
-          : lessonId === "list-append-nil"
-            ? appendNilRightProof()
-            : lessonId === "list-map-append"
-              ? mapAppendProof()
-              : lessonId === "list-rev-append"
-                ? revAppendProof()
-                : lessonId === "list-rev-involution"
-                  ? revInvolutionProof()
-            : lessonId === "map-composition"
-              ? mapCompositionProof()
-              : undefined;
-  if (theorem === undefined) throw new Error(`no kernel certificate for lesson ${lessonId}`);
+  const builders: Readonly<Record<string, () => { readonly type: Term; readonly term: Term }>> = {
+    "bool-compute": booleanComputationProof,
+    "bool-involution": booleanInvolutionProof,
+    "nat-add-example": natAdditionExampleProof,
+    "nat-add-zero": addZeroRightProof,
+    "list-append-nil": appendNilRightProof,
+    "list-map-append": mapAppendProof,
+    "list-rev-append": revAppendProof,
+    "list-rev-involution": revInvolutionProof,
+    "map-composition": mapCompositionProof,
+  };
+  const build = builders[lessonId];
+  if (build === undefined) throw new Error(`no kernel certificate for lesson ${lessonId}`);
+  const theorem = build();
   check(theorem.term, theorem.type, new Map(), environment);
 }

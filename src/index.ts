@@ -62,6 +62,16 @@ export type {
   ProofMove,
   Lesson,
 } from "./proof/session.js";
+export {
+  definitionByName,
+  definitionsToScript,
+  programDefinitions,
+  reduceByDefinition,
+} from "./proof/definitions.js";
+export type { DefinitionClause, ProgramDefinition, Reduction } from "./proof/definitions.js";
+export { parseProgramExpr, ProgramParseError } from "./proof/ast.js";
+export { inductiveByName, inductiveDefinitions, inductiveToScript } from "./proof/inductives.js";
+export type { ConstructorDefinition, ConstructorField, InductiveDefinition } from "./proof/inductives.js";
 
 // ---------------------------------------------------------------------------
 // 1. Expression trees

@@ -1,19 +1,22 @@
 import { verifyLessonProof } from "./standardLibrary.js";
+import {
+  allExpressions,
+  call,
+  cloneFresh,
+  ctor,
+  expressionEqual,
+  exprToText,
+  parseProgramExpr,
+  programVar,
+  replaceById,
+  replaceVariable,
+  type Expr,
+} from "./ast.js";
+import { reduceByDefinition } from "./definitions.js";
+import { inductiveByName } from "./inductives.js";
 
-export type Expr =
-  | { readonly id: string; readonly kind: "var"; readonly name: string }
-  | { readonly id: string; readonly kind: "ctor"; readonly name: string; readonly args: readonly Expr[] }
-  | { readonly id: string; readonly kind: "call"; readonly name: string; readonly args: readonly Expr[] };
-
-let nextId = 0;
-const id = (prefix: string): string => `${prefix}-${++nextId}`;
-export const programVar = (name: string, nodeId = id(name)): Expr => ({ id: nodeId, kind: "var", name });
-export const ctor = (name: string, args: readonly Expr[] = [], nodeId = id(name)): Expr => ({
-  id: nodeId, kind: "ctor", name, args,
-});
-export const call = (name: string, args: readonly Expr[], nodeId = id(name)): Expr => ({
-  id: nodeId, kind: "call", name, args,
-});
+export { call, ctor, exprToText, parseProgramExpr, programVar } from "./ast.js";
+export type { Expr } from "./ast.js";
 
 export interface Hypothesis {
   readonly id: string;
@@ -47,6 +50,14 @@ export interface ProofSession {
     readonly variable: string;
     readonly type: "Bool" | "Nat" | "List";
   };
+  readonly definitionNames: readonly string[];
+  readonly inductiveNames: readonly string[];
+  readonly branchLemmas?: Readonly<Record<string, readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly left: string;
+    readonly right: string;
+  }[]>>;
   readonly goals: readonly EquationGoal[];
   readonly focusedGoalId: string;
   readonly kernelStatus: "pending" | "checked";
@@ -158,143 +169,10 @@ export const lessonCatalog: readonly Lesson[] = [
   },
 ] as const;
 
-const compose = (f: Expr, g: Expr): Expr => call("compose", [f, g]);
-const map = (f: Expr, value: Expr): Expr => call("map", [f, value]);
-const apply = (fn: Expr, value: Expr): Expr => call("apply", [fn, value]);
-
-export function exprToText(expr: Expr): string {
-  if (expr.kind === "var") return expr.name;
-  if (expr.kind === "ctor") {
-    if (expr.name === "nil") return "[]";
-    if (expr.name === "zero") return "0";
-    if (expr.name === "succ" && expr.args.length === 1) return `S (${exprToText(expr.args[0]!)})`;
-    if (expr.name === "cons" && expr.args.length === 2) {
-      return `${exprToText(expr.args[0]!)} :: ${exprToText(expr.args[1]!)}`;
-    }
-    return expr.args.length === 0 ? expr.name : `${expr.name} ${expr.args.map(exprToText).join(" ")}`;
-  }
-  if (expr.name === "compose" && expr.args.length === 2) {
-    return `(${exprToText(expr.args[0]!)} ∘ ${exprToText(expr.args[1]!)})`;
-  }
-  if (expr.name === "apply" && expr.args.length === 2) {
-    return `${exprToText(expr.args[0]!)} (${exprToText(expr.args[1]!)})`;
-  }
-  if (expr.name === "map" && expr.args.length === 2) {
-    const fn = expr.args[0]!;
-    const value = expr.args[1]!;
-    const valueText = exprToText(value);
-    const renderedValue = value.kind === "var" || (value.kind === "ctor" && value.name === "nil")
-      ? valueText
-      : `(${valueText})`;
-    return `map ${exprToText(fn)} ${renderedValue}`;
-  }
-  if (expr.name === "negb" && expr.args.length === 1) {
-    const value = expr.args[0]!;
-    const text = exprToText(value);
-    return `negb ${value.kind === "var" || value.kind === "ctor" ? text : `(${text})`}`;
-  }
-  if (expr.name === "add" && expr.args.length === 2) {
-    return `${exprToText(expr.args[0]!)} + ${exprToText(expr.args[1]!)}`;
-  }
-  if (expr.name === "append" && expr.args.length === 2) {
-    return `${exprToText(expr.args[0]!)} ++ ${exprToText(expr.args[1]!)}`;
-  }
-  if (expr.name === "rev" && expr.args.length === 1) {
-    const value = expr.args[0]!;
-    const text = exprToText(value);
-    return `rev ${value.kind === "var" || (value.kind === "ctor" && value.name === "nil") ? text : `(${text})`}`;
-  }
-  return `${expr.name} ${expr.args.map((arg) => {
-    const text = exprToText(arg);
-    return arg.kind === "call" && arg.name !== "compose" ? `(${text})` : text;
-  }).join(" ")}`;
-}
-
 export function equationToText(goal: Pick<EquationGoal, "left" | "right">): string {
   return `${exprToText(goal.left)} = ${exprToText(goal.right)}`;
 }
 
-function cloneFresh(expr: Expr): Expr {
-  if (expr.kind === "var") return programVar(expr.name);
-  return expr.kind === "ctor"
-    ? ctor(expr.name, expr.args.map(cloneFresh))
-    : call(expr.name, expr.args.map(cloneFresh));
-}
-
-function expressionEqual(left: Expr, right: Expr): boolean {
-  return left.kind === right.kind && left.name === right.name
-    && left.kind !== "var" && right.kind !== "var"
-      ? left.args.length === right.args.length && left.args.every((arg, index) => expressionEqual(arg, right.args[index]!))
-      : left.kind === "var" && right.kind === "var" && left.name === right.name;
-}
-
-function replaceVariable(expr: Expr, name: string, replacement: Expr): Expr {
-  if (expr.kind === "var") return expr.name === name ? cloneFresh(replacement) : expr;
-  const args = expr.args.map((arg) => replaceVariable(arg, name, replacement));
-  return expr.kind === "ctor" ? { ...expr, args } : { ...expr, args };
-}
-
-function replaceById(expr: Expr, targetId: string, replacement: Expr): Expr {
-  if (expr.id === targetId) {
-    const fresh = cloneFresh(replacement);
-    return { ...fresh, id: targetId };
-  }
-  if (expr.kind === "var") return expr;
-  const args = expr.args.map((arg) => replaceById(arg, targetId, replacement));
-  return { ...expr, args };
-}
-
-function allExpressions(expr: Expr): Expr[] {
-  return expr.kind === "var" ? [expr] : [expr, ...expr.args.flatMap(allExpressions)];
-}
-
-function reduce(expr: Expr): Expr | undefined {
-  if (expr.kind !== "call") return undefined;
-  if (expr.name === "negb" && expr.args.length === 1) {
-    const value = expr.args[0];
-    if (value?.kind === "ctor" && value.name === "true") return ctor("false", [], expr.id);
-    if (value?.kind === "ctor" && value.name === "false") return ctor("true", [], expr.id);
-  }
-  if (expr.name === "add" && expr.args.length === 2) {
-    const [left, right] = expr.args;
-    if (left?.kind === "ctor" && left.name === "zero" && right !== undefined) return { ...cloneFresh(right), id: expr.id };
-    if (left?.kind === "ctor" && left.name === "succ" && left.args.length === 1 && right !== undefined) {
-      return ctor("succ", [call("add", [cloneFresh(left.args[0]!), cloneFresh(right)])], expr.id);
-    }
-  }
-  if (expr.name === "append" && expr.args.length === 2) {
-    const [left, right] = expr.args;
-    if (left?.kind === "ctor" && left.name === "nil" && right !== undefined) return { ...cloneFresh(right), id: expr.id };
-    if (left?.kind === "ctor" && left.name === "cons" && left.args.length === 2 && right !== undefined) {
-      return ctor("cons", [cloneFresh(left.args[0]!), call("append", [cloneFresh(left.args[1]!), cloneFresh(right)])], expr.id);
-    }
-  }
-  if (expr.name === "rev" && expr.args.length === 1) {
-    const value = expr.args[0];
-    if (value?.kind === "ctor" && value.name === "nil") return ctor("nil", [], expr.id);
-    if (value?.kind === "ctor" && value.name === "cons" && value.args.length === 2) {
-      return call("append", [
-        call("rev", [cloneFresh(value.args[1]!)]),
-        ctor("cons", [cloneFresh(value.args[0]!), ctor("nil")]),
-      ], expr.id);
-    }
-  }
-  if (expr.name === "map" && expr.args.length === 2) {
-    const [fn, list] = expr.args;
-    if (fn === undefined || list === undefined) return undefined;
-    if (list.kind === "ctor" && list.name === "nil") return { ...list, id: expr.id };
-    if (list.kind === "ctor" && list.name === "cons" && list.args.length === 2) {
-      return ctor("cons", [apply(cloneFresh(fn), cloneFresh(list.args[0]!)), map(cloneFresh(fn), cloneFresh(list.args[1]!))], expr.id);
-    }
-  }
-  if (expr.name === "apply" && expr.args.length === 2) {
-    const [fn, value] = expr.args;
-    if (fn?.kind === "call" && fn.name === "compose" && fn.args.length === 2 && value !== undefined) {
-      return apply(cloneFresh(fn.args[0]!), apply(cloneFresh(fn.args[1]!), cloneFresh(value)));
-    }
-  }
-  return undefined;
-}
 
 function focusedGoal(session: ProofSession): EquationGoal {
   const goal = session.goals.find((candidate) => candidate.id === session.focusedGoalId);
@@ -302,159 +180,58 @@ function focusedGoal(session: ProofSession): EquationGoal {
   return goal;
 }
 
-export function createMapCompositionSession(): ProofSession {
-  const f = programVar("f", "var-f");
-  const g = programVar("g", "var-g");
-  const list = programVar("l", "var-l");
-  const left = map(compose(f, g), list);
-  const right = map(f, map(g, programVar("l")));
-  const goal: EquationGoal = {
-    id: "goal-root",
-    label: "map composition",
-    context: ["A : Type", "f : A → A", "g : A → A", "l : List A"],
-    hypotheses: [],
-    left,
-    right,
-    status: "open",
-    steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: "theorem statement" }],
-  };
-  return {
-    lessonId: "map-composition",
-    theorem: "map_comp",
-    statement: "map (f ∘ g) l = map f (map g l)",
-    analysis: { kind: "induction", variable: "l", type: "List" },
-    goals: [goal],
-    focusedGoalId: goal.id,
-    kernelStatus: "pending",
-  };
+interface LessonSpec {
+  readonly theorem: string;
+  readonly context: readonly string[];
+  readonly left: string;
+  readonly right: string;
+  readonly definitions: readonly string[];
+  readonly inductives: readonly string[];
+  readonly analysis?: NonNullable<ProofSession["analysis"]>;
+  readonly branchLemmas?: ProofSession["branchLemmas"];
 }
 
-function rootSession(
-  lessonId: string,
-  theorem: string,
-  statement: string,
-  context: readonly string[],
-  left: Expr,
-  right: Expr,
-  analysis?: NonNullable<ProofSession["analysis"]>,
-): ProofSession {
-  const goal: EquationGoal = {
-    id: "goal-root",
-    label: lessonCatalog.find((lesson) => lesson.id === lessonId)?.title ?? theorem,
-    context,
-    hypotheses: [],
-    left,
-    right,
-    status: "open",
-    steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: "theorem statement" }],
-  };
-  return {
-    lessonId,
-    theorem,
-    statement,
-    ...(analysis === undefined ? {} : { analysis }),
-    goals: [goal],
-    focusedGoalId: goal.id,
-    kernelStatus: "pending",
-  };
-}
+const lessonSpecs: Readonly<Record<string, LessonSpec>> = {
+  "bool-compute": { theorem: "negb_false", context: [], left: "negb(false)", right: "true", definitions: ["negb"], inductives: ["Bool"] },
+  "bool-involution": { theorem: "negb_involutive", context: ["b : Bool"], left: "negb(negb(b))", right: "b", definitions: ["negb"], inductives: ["Bool"], analysis: { kind: "cases", variable: "b", type: "Bool" } },
+  "nat-add-example": { theorem: "two_plus_one", context: [], left: "add(succ(succ(zero)), succ(zero))", right: "succ(succ(succ(zero)))", definitions: ["add"], inductives: ["Nat"] },
+  "nat-add-zero": { theorem: "add_zero_right", context: ["n : Nat"], left: "add(n, zero)", right: "n", definitions: ["add"], inductives: ["Nat"], analysis: { kind: "induction", variable: "n", type: "Nat" } },
+  "list-append-nil": { theorem: "append_nil_right", context: ["A : Type", "xs : List A"], left: "append(xs, nil)", right: "xs", definitions: ["append"], inductives: ["List"], analysis: { kind: "induction", variable: "xs", type: "List" } },
+  "list-map-append": { theorem: "map_append", context: ["A, B : Type", "f : A → B", "xs : List A", "ys : List A"], left: "map(f, append(xs, ys))", right: "append(map(f, xs), map(f, ys))", definitions: ["append", "map"], inductives: ["List"], analysis: { kind: "induction", variable: "xs", type: "List" } },
+  "list-rev-append": {
+    theorem: "rev_append", context: ["A : Type", "xs : List A", "ys : List A"], left: "rev(append(xs, ys))", right: "append(rev(ys), rev(xs))", definitions: ["append", "rev"], inductives: ["List"], analysis: { kind: "induction", variable: "xs", type: "List" },
+    branchLemmas: {
+      "empty list": [{ id: "lemma-append-nil", name: "append_nil", left: "append(rev(ys), nil)", right: "rev(ys)" }],
+      "x :: xs": [{ id: "lemma-append-assoc", name: "append_assoc", left: "append(append(rev(ys), rev(xs)), cons(x, nil))", right: "append(rev(ys), append(rev(xs), cons(x, nil)))" }],
+    },
+  },
+  "list-rev-involution": {
+    theorem: "rev_involutive", context: ["A : Type", "xs : List A"], left: "rev(rev(xs))", right: "xs", definitions: ["append", "rev"], inductives: ["List"], analysis: { kind: "induction", variable: "xs", type: "List" },
+    branchLemmas: { "x :: xs": [{ id: "lemma-rev-append", name: "rev_append", left: "rev(append(rev(xs), cons(x, nil)))", right: "append(rev(cons(x, nil)), rev(rev(xs)))" }] },
+  },
+  "map-composition": { theorem: "map_comp", context: ["A : Type", "f : A → A", "g : A → A", "l : List A"], left: "map(compose(f, g), l)", right: "map(f, map(g, l))", definitions: ["map", "apply"], inductives: ["List"], analysis: { kind: "induction", variable: "l", type: "List" } },
+};
 
 export function createLessonSession(lessonId: string): ProofSession {
-  if (lessonId === "map-composition") return createMapCompositionSession();
-  if (lessonId === "bool-compute") {
-    return rootSession(
-      lessonId,
-      "negb_false",
-      "negb false = true",
-      [],
-      call("negb", [ctor("false")]),
-      ctor("true"),
-    );
-  }
-  if (lessonId === "bool-involution") {
-    const b = programVar("b", "var-b");
-    return rootSession(
-      lessonId,
-      "negb_involutive",
-      "negb (negb b) = b",
-      ["b : Bool"],
-      call("negb", [call("negb", [b])]),
-      programVar("b"),
-      { kind: "cases", variable: "b", type: "Bool" },
-    );
-  }
-  if (lessonId === "nat-add-zero") {
-    const n = programVar("n", "var-n");
-    return rootSession(
-      lessonId,
-      "add_zero_right",
-      "n + 0 = n",
-      ["n : Nat"],
-      call("add", [n, ctor("zero")]),
-      programVar("n"),
-      { kind: "induction", variable: "n", type: "Nat" },
-    );
-  }
-  if (lessonId === "nat-add-example") {
-    const zero = ctor("zero");
-    const one = ctor("succ", [zero]);
-    const two = ctor("succ", [ctor("succ", [ctor("zero")])]);
-    const three = ctor("succ", [ctor("succ", [ctor("succ", [ctor("zero")])])]);
-    return rootSession(
-      lessonId,
-      "two_plus_one",
-      "2 + 1 = 3",
-      [],
-      call("add", [two, one]),
-      three,
-    );
-  }
-  if (lessonId === "list-append-nil") {
-    const xs = programVar("xs", "var-xs");
-    return rootSession(
-      lessonId,
-      "append_nil_right",
-      "xs ++ [] = xs",
-      ["A : Type", "xs : List A"],
-      call("append", [xs, ctor("nil")]),
-      programVar("xs"),
-      { kind: "induction", variable: "xs", type: "List" },
-    );
-  }
-  if (lessonId === "list-map-append") {
-    return rootSession(
-      lessonId,
-      "map_append",
-      "map f (xs ++ ys) = map f xs ++ map f ys",
-      ["A, B : Type", "f : A → B", "xs : List A", "ys : List A"],
-      call("map", [programVar("f", "var-f"), call("append", [programVar("xs", "var-xs"), programVar("ys", "var-ys")])]),
-      call("append", [call("map", [programVar("f"), programVar("xs")]), call("map", [programVar("f"), programVar("ys")])]),
-      { kind: "induction", variable: "xs", type: "List" },
-    );
-  }
-  if (lessonId === "list-rev-append") {
-    return rootSession(
-      lessonId,
-      "rev_append",
-      "rev (xs ++ ys) = rev ys ++ rev xs",
-      ["A : Type", "xs : List A", "ys : List A"],
-      call("rev", [call("append", [programVar("xs", "var-xs"), programVar("ys", "var-ys")])]),
-      call("append", [call("rev", [programVar("ys")]), call("rev", [programVar("xs")])]),
-      { kind: "induction", variable: "xs", type: "List" },
-    );
-  }
-  if (lessonId === "list-rev-involution") {
-    return rootSession(
-      lessonId,
-      "rev_involutive",
-      "rev (rev xs) = xs",
-      ["A : Type", "xs : List A"],
-      call("rev", [call("rev", [programVar("xs", "var-xs")])]),
-      programVar("xs"),
-      { kind: "induction", variable: "xs", type: "List" },
-    );
-  }
-  throw new Error(`unknown lesson ${lessonId}`);
+  const spec = lessonSpecs[lessonId];
+  const lesson = lessonCatalog.find((candidate) => candidate.id === lessonId);
+  if (spec === undefined || lesson === undefined) throw new Error(`unknown lesson ${lessonId}`);
+  const left = parseProgramExpr(spec.left);
+  const right = parseProgramExpr(spec.right);
+  const goal: EquationGoal = {
+    id: "goal-root", label: lesson.title, context: spec.context, hypotheses: [], left, right, status: "open",
+    steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: "theorem statement" }],
+  };
+  return {
+    lessonId, theorem: spec.theorem, statement: lesson.theorem, definitionNames: spec.definitions, inductiveNames: spec.inductives,
+    ...(spec.analysis === undefined ? {} : { analysis: spec.analysis }),
+    ...(spec.branchLemmas === undefined ? {} : { branchLemmas: spec.branchLemmas }),
+    goals: [goal], focusedGoalId: goal.id, kernelStatus: "pending",
+  };
+}
+
+export function createMapCompositionSession(): ProofSession {
+  return createLessonSession("map-composition");
 }
 
 export function enumerateProofMoves(session: ProofSession): ProofMove[] {
@@ -482,12 +259,13 @@ export function enumerateProofMoves(session: ProofSession): ProofMove[] {
   }
   for (const side of ["left", "right"] as const) {
     for (const expression of allExpressions(goal[side])) {
-      if (reduce(expression) !== undefined) {
+      const reduction = reduceByDefinition(expression);
+      if (reduction !== undefined) {
         moves.push({
           id: `reduce:${side}:${expression.id}`,
           kind: "reduce",
-          label: expression.name === "map" ? "Unfold map" : "Unfold composition",
-          explanation: "Apply the matching defining equation to this expression.",
+          label: `${reduction.definition.name} case: ${reduction.clause.label}`,
+          explanation: `Apply the defining equation “${reduction.clause.script}”.`,
           handle: expression.id,
           side,
           targetId: expression.id,
@@ -538,25 +316,18 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
   if ((move.kind === "induction" || move.kind === "cases") && session.analysis !== undefined) {
     const { variable: name, type: analyzedType } = session.analysis;
     const baseContext = goal.context.filter((entry) => !entry.startsWith(`${name} :`));
-    const constructors: Array<{
-      label: string;
-      value: Expr;
-      context: readonly string[];
-      recursive?: Expr;
-    }> = analyzedType === "Bool"
-      ? [
-          { label: "true", value: ctor("true"), context: baseContext },
-          { label: "false", value: ctor("false"), context: baseContext },
-        ]
-      : analyzedType === "Nat"
-        ? [
-            { label: "zero", value: ctor("zero"), context: baseContext },
-            { label: "succ n", value: ctor("succ", [programVar("n")]), context: [...baseContext, "n : Nat"], recursive: programVar("n") },
-          ]
-        : [
-            { label: "empty list", value: ctor("nil"), context: baseContext },
-            { label: "x :: xs", value: ctor("cons", [programVar("x"), programVar("xs")]), context: [...baseContext, "x : A", "xs : List A"], recursive: programVar("xs") },
-          ];
+    const inductive = inductiveByName(analyzedType);
+    if (inductive === undefined) throw new Error(`unknown inductive type ${analyzedType}`);
+    const constructors = inductive.constructors.map((constructor) => {
+      const fields = constructor.fields.map((field) => programVar(field.name));
+      const recursiveIndex = constructor.fields.findIndex((field) => field.recursive === true);
+      return {
+        label: constructor.label,
+        value: ctor(constructor.name, fields),
+        context: [...baseContext, ...constructor.fields.map((field) => `${field.name} : ${field.type}`)],
+        ...(recursiveIndex < 0 ? {} : { recursive: fields[recursiveIndex]! }),
+      };
+    });
     let obligations = constructors.map((branch, index): EquationGoal => {
       const left = replaceVariable(goal.left, name, branch.value);
       const right = replaceVariable(goal.right, name, branch.value);
@@ -579,50 +350,28 @@ export function applyProofMove(session: ProofSession, moveId: string): ProofSess
         steps: [{ equation: `${exprToText(left)} = ${exprToText(right)}`, reason: `${branch.label} obligation` }],
       };
     });
-    if (session.lessonId === "list-rev-append") {
-      obligations = obligations.map((obligation, index) => {
-        const revYs = call("rev", [programVar("ys")]);
-        if (index === 0) {
-          return { ...obligation, hypotheses: [...obligation.hypotheses, {
-            id: "lemma-append-nil",
-            name: "append_nil",
-            left: call("append", [revYs, ctor("nil")]),
-            right: cloneFresh(revYs),
-          }] };
-        }
-        const revXs = call("rev", [programVar("xs")]);
-        const singleton = ctor("cons", [programVar("x"), ctor("nil")]);
-        return { ...obligation, hypotheses: [...obligation.hypotheses, {
-          id: "lemma-append-assoc",
-          name: "append_assoc",
-          left: call("append", [call("append", [revYs, revXs]), singleton]),
-          right: call("append", [cloneFresh(revYs), call("append", [cloneFresh(revXs), cloneFresh(singleton)])]),
-        }] };
-      });
-    }
-    if (session.lessonId === "list-rev-involution") {
-      obligations = obligations.map((obligation, index) => {
-        if (index === 0) return obligation;
-        const xs = programVar("xs");
-        const singleton = ctor("cons", [programVar("x"), ctor("nil")]);
-        return { ...obligation, hypotheses: [...obligation.hypotheses, {
-          id: "lemma-rev-append",
-          name: "rev_append",
-          left: call("rev", [call("append", [call("rev", [xs]), singleton])]),
-          right: call("append", [call("rev", [cloneFresh(singleton)]), call("rev", [call("rev", [cloneFresh(xs)])])]),
-        }] };
-      });
-    }
+    obligations = obligations.map((obligation) => {
+      const configured = session.branchLemmas?.[obligation.label] ?? [];
+      return configured.length === 0 ? obligation : {
+        ...obligation,
+        hypotheses: [...obligation.hypotheses, ...configured.map((lemma): Hypothesis => ({
+          id: lemma.id,
+          name: lemma.name,
+          left: parseProgramExpr(lemma.left),
+          right: parseProgramExpr(lemma.right),
+        }))],
+      };
+    });
     return { ...session, goals: obligations, focusedGoalId: obligations[0]!.id };
   }
 
   if (move.kind === "reduce" && move.side !== undefined && move.targetId !== undefined) {
     const target = allExpressions(goal[move.side]).find((expr) => expr.id === move.targetId);
-    const replacement = target === undefined ? undefined : reduce(target);
-    if (replacement === undefined) throw new Error("reduction target is no longer reducible");
+    const reduction = target === undefined ? undefined : reduceByDefinition(target);
+    if (reduction === undefined) throw new Error("reduction target is no longer reducible");
     const nextGoal = {
       ...goal,
-      [move.side]: replaceById(goal[move.side], move.targetId, replacement),
+      [move.side]: replaceById(goal[move.side], move.targetId, reduction.expression),
     } as EquationGoal;
     const withStep = {
       ...nextGoal,
