@@ -7,14 +7,16 @@ import {
   type ProgramExpr,
   type ProofMove,
 } from "@touchproof/core";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   browserProofBackend,
   type ProofAction,
   type ProofSnapshot,
   type ProgressListener,
 } from "@/lib/proof/browserProofBackend";
-import { clauseToScript, inductiveToScriptAt } from "@/lib/programDoc";
+import type { Segment } from "@/lib/doc";
+import { clauseToSegments, expressionShape, inductiveToSegments } from "@/lib/programDoc";
+import { tokenizeScript } from "@/lib/scriptTokens";
 import { dropMove, movesForHandle, proofProgress } from "@/lib/viewModel";
 
 type View = "visual" | "notebook" | "script";
@@ -25,13 +27,39 @@ const MAX_DOCUMENT_BYTES = 200_000;
 // 2 x 11px padding = 263px; at 12px ui-monospace (~0.6em = 7.2px advance)
 // that is ~36 characters, with the pretty-printer breaking anything longer.
 const DEFINITION_CARD_CODE_COLUMNS = 36;
+// The DOM view renders every node as a tappable span (no [x] list sugar), so
+// cons stays a binary operator for parenthesization purposes.
+const DOM_SHAPE = { listLiterals: false } as const;
 
 function progressText(progress: Parameters<ProgressListener>[0]): string {
   return progress.phase === "checking" ? "The TouchProof kernel is checking this proof…" : "Checking proof…";
 }
 
+function moveIcon(move: ProofMove): string {
+  if (move.kind === "cases") return "⑂";
+  if (move.kind === "induction") return "ℕ";
+  if (move.kind === "generalize") return "∀";
+  if (move.kind === "rewrite") return "⇢";
+  if (move.kind === "close") return "✓";
+  return "↳";
+}
+
+/** Ordered highlighted runs (doc segments or tokenizer output) as spans. */
+function TokenSpans({ segments }: { segments: readonly Segment[] }) {
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.tag === undefined
+          ? <span key={index}>{segment.text}</span>
+          : <span key={index} className={`tok-${segment.tag}`}>{segment.text}</span>)}
+    </>
+  );
+}
+
 const SelectionContext = createContext<{
   selectedHandle?: string;
+  previewHandle?: string;
+  previewTarget?: string;
   select: (handle?: string, point?: { x: number; y: number }) => void;
 }>({ select: () => undefined });
 
@@ -97,15 +125,42 @@ function CanvasCard({
   );
 }
 
-function Expression({
-  expression,
-  moves,
-  onMove,
-}: {
+interface ExpressionProps {
   expression: ProgramExpr;
   moves: readonly ProofMove[];
   onMove: (moveId: string) => void;
-}) {
+}
+
+/** An operand of an infix operator: nested infix expressions are wrapped,
+ * exactly mirroring the pretty-printer's shared shape rules. */
+function ExprOperand({ expression, moves, onMove }: ExpressionProps) {
+  const wrap = expressionShape(expression, DOM_SHAPE) === "binary";
+  return (
+    <>
+      {wrap && <span className="paren">(</span>}
+      <Expression expression={expression} moves={moves} onMove={onMove} />
+      {wrap && <span className="paren">)</span>}
+    </>
+  );
+}
+
+/** An argument of a juxtaposed application: everything but atoms is wrapped.
+ * The .argument span provides the spacing; no space characters means the
+ * head can never be split from its argument by line wrapping. */
+function ExprArgument({ expression, moves, onMove }: ExpressionProps) {
+  const wrap = expressionShape(expression, DOM_SHAPE) !== "atom";
+  return (
+    <span className="argument">
+      {wrap && <span className="paren">(</span>}
+      <Expression expression={expression} moves={moves} onMove={onMove} />
+      {wrap && <span className="paren">)</span>}
+    </span>
+  );
+}
+
+// Exported for tests: the parenthesization must stay in lockstep with the
+// pretty-printer (both build on expressionShape).
+export function Expression({ expression, moves, onMove }: ExpressionProps) {
   const selection = useContext(SelectionContext);
   const fromHere = movesForHandle(moves, expression.id);
   const isDropTarget = moves.some((move) => move.dropTarget === expression.id);
@@ -116,48 +171,29 @@ function Expression({
       if (expression.name === "nil") return "[]";
       if (expression.name === "zero") return "0";
       if (expression.name === "succ" && expression.args.length === 1) {
-        // NBSP join ("\u00A0"): a function head is never split from its argument.
-        return <><span className="function-name">S</span><span className="paren">{"\u00A0("}</span><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
+        return <><span className="function-name">S</span><ExprArgument expression={expression.args[0]!} moves={moves} onMove={onMove} /></>;
       }
       if (expression.name === "cons" && expression.args.length === 2) {
         // Breakable space BEFORE the operator, NBSP after: a wrapped operator starts the continuation line.
-        return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{" ::\u00A0"}</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
+        return <><ExprOperand expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{" ::\u00A0"}</span><ExprOperand expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
       }
-      return <>{expression.name}{"\u00A0"}{expression.args.map((arg) => <Expression key={arg.id} expression={arg} moves={moves} onMove={onMove} />)}</>;
+      return <>{expression.name}{expression.args.map((arg) => <ExprArgument key={arg.id} expression={arg} moves={moves} onMove={onMove} />)}</>;
     }
     if (expression.name === "compose" && expression.args.length === 2) {
-      return <><span className="paren">(</span><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{" ∘\u00A0"}</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
+      return <><span className="paren">(</span><ExprOperand expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{" ∘\u00A0"}</span><ExprOperand expression={expression.args[1]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
     }
     if (expression.name === "apply" && expression.args.length === 2) {
-      return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="paren">(</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
-    }
-    if (expression.name === "map" && expression.args.length === 2) {
-      const value = expression.args[1]!;
-      const needsParens = value.kind === "call" || (value.kind === "ctor" && value.name !== "nil");
-      return <><span className="function-name">map</span><span className="argument"><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /></span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
-    }
-    if (expression.name === "negb" && expression.args.length === 1) {
-      const value = expression.args[0]!;
-      const needsParens = value.kind === "call";
-      return <><span className="function-name">negb</span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
-    }
-    if ((expression.name === "rev" || expression.name === "length") && expression.args.length === 1) {
-      const value = expression.args[0]!;
-      const needsParens = value.kind === "call" || (value.kind === "ctor" && value.name !== "nil");
-      return <><span className="function-name">{expression.name}</span><span className="argument">{needsParens && <span className="paren">(</span>}<Expression expression={value} moves={moves} onMove={onMove} />{needsParens && <span className="paren">)</span>}</span></>;
-    }
-    if (expression.name === "revAcc" && expression.args.length === 2) {
-      return <><span className="function-name">revAcc</span><span className="argument"><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /></span><span className="argument">(<Expression expression={expression.args[1]!} moves={moves} onMove={onMove} />)</span></>;
+      return <><ExprOperand expression={expression.args[0]!} moves={moves} onMove={onMove} /><ExprArgument expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
     }
     if ((expression.name === "add" || expression.name === "append") && expression.args.length === 2) {
-      return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{expression.name === "add" ? " +\u00A0" : " ++\u00A0"}</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
+      return <><ExprOperand expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{expression.name === "add" ? " +\u00A0" : " ++\u00A0"}</span><ExprOperand expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
     }
-    return <><span className="function-name">{expression.name}</span>{expression.args.map((arg) => <span className="argument" key={arg.id}><Expression expression={arg} moves={moves} onMove={onMove} /></span>)}</>;
+    return <><span className="function-name">{expression.name}</span>{expression.args.map((arg) => <ExprArgument key={arg.id} expression={arg} moves={moves} onMove={onMove} />)}</>;
   })();
 
   return (
     <span
-      className={`expression ${fromHere.length > 0 ? "movable tappable" : ""} ${selection.selectedHandle === expression.id ? "selected" : ""} ${isDropTarget ? "drop-target" : ""}`}
+      className={`expression ${fromHere.length > 0 ? "movable tappable" : ""} ${selection.selectedHandle === expression.id ? "selected" : ""} ${isDropTarget ? "drop-target" : ""} ${selection.previewHandle === expression.id ? "preview-target" : ""} ${selection.previewTarget === expression.id ? "preview-dest" : ""}`}
       draggable={fromHere.length > 0}
       role={fromHere.length === 0 ? undefined : "button"}
       tabIndex={fromHere.length === 0 ? undefined : 0}
@@ -208,6 +244,90 @@ function ScopeBox({ variables, children }: { variables: readonly string[]; child
   ), children);
 }
 
+function MoveContextMenu({
+  moves,
+  anchor,
+  onPick,
+  onClose,
+  onPreview,
+}: {
+  moves: readonly ProofMove[];
+  anchor: { x: number; y: number };
+  onPick: (moveId: string) => void;
+  onClose: () => void;
+  onPreview: (move?: ProofMove) => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<{ left: number; top: number; flipped: boolean }>({ left: anchor.x, top: anchor.y, flipped: false });
+
+  // Measure the real menu box, clamp it to the viewport and flip it above the
+  // anchor when it would overflow below (runs before paint — no flicker).
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (menu === null) return;
+    const { width, height } = menu.getBoundingClientRect();
+    const left = Math.max(8, Math.min(anchor.x, window.innerWidth - width - 22));
+    const flipped = anchor.y + height + 30 > window.innerHeight;
+    const top = flipped ? Math.max(8, anchor.y - height - 22) : anchor.y;
+    setPlacement({ left, top, flipped });
+  }, [anchor.x, anchor.y, moves.length]);
+
+  // Standard menu focus: remember the opener, focus the first item on open,
+  // return focus to the opener when the menu closes (Escape, pick, outside click).
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+    return () => opener?.focus();
+  }, []);
+
+  const moveFocus = (delta: number) => {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ?? []);
+    if (items.length === 0) return;
+    const active = items.findIndex((item) => item === document.activeElement);
+    const next = active === -1 ? (delta > 0 ? 0 : items.length - 1) : (active + delta + items.length) % items.length;
+    items[next]?.focus();
+  };
+
+  return (
+    <div
+      ref={menuRef}
+      className={`context-menu ${placement.flipped ? "flipped" : ""}`}
+      role="menu"
+      style={{ left: placement.left, top: placement.top }}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        } else if (event.key === "ArrowDown") {
+          event.preventDefault();
+          moveFocus(1);
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
+          moveFocus(-1);
+        }
+      }}
+    >
+      <div className="context-menu-title">What do you want to do here?</div>
+      {moves.map((move) => (
+        <button
+          role="menuitem"
+          key={move.id}
+          onClick={() => onPick(move.id)}
+          onPointerEnter={() => onPreview(move)}
+          onPointerLeave={() => onPreview(undefined)}
+          onFocus={() => onPreview(move)}
+          onBlur={() => onPreview(undefined)}
+        >
+          <span>{moveIcon(move)}</span>
+          <div><strong>{move.label}</strong><small>{move.explanation}</small></div>
+        </button>
+      ))}
+      {moves.some((move) => move.dropTarget !== undefined) && <p>You can also drag this term onto a highlighted target.</p>}
+    </div>
+  );
+}
+
 export function ProofWorkspace() {
   const [state, setState] = useState<ProofSnapshot>();
   const [view, setView] = useState<View>("visual");
@@ -215,11 +335,14 @@ export function ProofWorkspace() {
   const [error, setError] = useState<string>();
   const [loadingMessage, setLoadingMessage] = useState("Preparing the TouchProof kernel…");
   const [selection, setSelection] = useState<{ handle: string; x: number; y: number }>();
+  const [preview, setPreview] = useState<ProofMove>();
+  const [confirmReset, setConfirmReset] = useState(false);
   const [undoStack, setUndoStack] = useState<ProofSnapshot[]>([]);
   const [redoStack, setRedoStack] = useState<ProofSnapshot[]>([]);
   const importInput = useRef<HTMLInputElement>(null);
   const inFlight = useRef(false);
   const bootstrapGeneration = useRef(0);
+  const resetTimer = useRef<number>(undefined);
 
   useEffect(() => {
     const generation = ++bootstrapGeneration.current;
@@ -264,11 +387,14 @@ export function ProofWorkspace() {
     if (state !== undefined) window.localStorage.setItem("touchproof:current:v4", JSON.stringify(state.session));
   }, [state]);
 
+  useEffect(() => () => window.clearTimeout(resetTimer.current), []);
+
   const startLesson = async (lessonId: string) => {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setError(undefined);
+    setPreview(undefined);
     try {
       setState(await backend.startLesson(lessonId, (progress) => setLoadingMessage(progressText(progress))));
       setUndoStack([]);
@@ -286,9 +412,10 @@ export function ProofWorkspace() {
     inFlight.current = true;
     setBusy(true);
     setError(undefined);
+    setPreview(undefined);
     try {
       window.localStorage.removeItem("touchproof:current:v4");
-      setState(await backend.startLesson(state?.session.lessonId ?? "bool-involution", (progress) => setLoadingMessage(progressText(progress))));
+      setState(await backend.startLesson(state?.session.lessonId ?? "bool-compute", (progress) => setLoadingMessage(progressText(progress))));
       setUndoStack([]);
       setRedoStack([]);
     } catch (reason) {
@@ -299,12 +426,26 @@ export function ProofWorkspace() {
     }
   };
 
+  // Two-step reset: the first click arms a vermilion "Confirm reset" for four
+  // seconds; a second click resets; clicking elsewhere or the timeout reverts.
+  const requestReset = () => {
+    if (busy) return;
+    window.clearTimeout(resetTimer.current);
+    if (!confirmReset) {
+      setConfirmReset(true);
+      resetTimer.current = window.setTimeout(() => setConfirmReset(false), 4000);
+      return;
+    }
+    setConfirmReset(false);
+    void reset();
+  };
+
   const exportDocument = () => {
     if (state === undefined) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify(state.session, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = "map-comp.touchproof.json";
+    link.download = `${state.session.lessonId}.touchproof.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -336,6 +477,7 @@ export function ProofWorkspace() {
     inFlight.current = true;
     setBusy(true);
     setError(undefined);
+    setPreview(undefined);
     try {
       const result = await backend.dispatch(state.session, action, (progress) => setLoadingMessage(progressText(progress)));
       if (action.kind === "apply-move") {
@@ -354,8 +496,11 @@ export function ProofWorkspace() {
 
   const currentGoal = state?.session.goals.find((goal) => goal.id === state.session.focusedGoalId);
   const progress = useMemo(() => state === undefined ? { solved: 0, total: 0 } : proofProgress(state.session), [state]);
+  const solved = progress.total > 0 && progress.solved === progress.total;
   const analysisMove = state?.moves.find((move) => move.kind === "induction" || move.kind === "cases");
   const currentLesson = state?.lessons.find((lesson) => lesson.id === state.session.lessonId);
+  const lessonIndex = state?.lessons.findIndex((lesson) => lesson.id === state.session.lessonId) ?? -1;
+  const nextLesson = lessonIndex >= 0 ? state?.lessons[lessonIndex + 1] : undefined;
   const contextualMoves = state?.moves.filter((move) => move.handle === selection?.handle) ?? [];
   const closeMove = state?.moves.find((move) => move.kind === "close");
   const undo = () => {
@@ -378,12 +523,18 @@ export function ProofWorkspace() {
   };
   const selectHandle = (handle?: string, point?: { x: number; y: number }) => {
     if (handle === undefined) setSelection(undefined);
-    else if (point !== undefined) setSelection({
-      handle,
-      x: Math.min(point.x, window.innerWidth - 410),
-      y: Math.min(point.y, window.innerHeight - 290),
-    });
+    else if (point !== undefined) setSelection({ handle, x: point.x, y: point.y });
   };
+  const closeMenu = () => {
+    setSelection(undefined);
+    setPreview(undefined);
+  };
+  const previewProps = (move: ProofMove) => ({
+    onPointerEnter: () => setPreview(move),
+    onPointerLeave: () => setPreview(undefined),
+    onFocus: () => setPreview(move),
+    onBlur: () => setPreview(undefined),
+  });
 
   if (state === undefined) {
     return <main className="loading"><div className="brand-mark">T</div><p>{error ?? loadingMessage}</p>{error !== undefined && <button onClick={() => window.location.reload()}>Retry</button>}</main>;
@@ -392,9 +543,11 @@ export function ProofWorkspace() {
   return (
     <SelectionContext.Provider value={{
       ...(selection === undefined ? {} : { selectedHandle: selection.handle }),
+      ...(preview?.handle === undefined ? {} : { previewHandle: preview.handle }),
+      ...(preview?.dropTarget === undefined ? {} : { previewTarget: preview.dropTarget }),
       select: selectHandle,
     }}>
-    <main className="workspace" onClick={() => setSelection(undefined)}>
+    <main className="workspace" onClick={() => { setSelection(undefined); setConfirmReset(false); }}>
       <header className="topbar">
         <div className="brand"><span className="brand-mark">T</span><span>TouchProof</span><small>Learn by transforming</small></div>
         <div className="view-switch" aria-label="Proof view">
@@ -403,11 +556,18 @@ export function ProofWorkspace() {
           <button className={view === "script" ? "active" : ""} onClick={() => setView("script")}>Script</button>
         </div>
         <div className="header-actions">
-          <button className="history-button" disabled={busy || undoStack.length === 0} title="Back one proof step" onClick={undo}>←</button>
-          <button className="history-button" disabled={busy || redoStack.length === 0} title="Forward one proof step" onClick={redo}>→</button>
+          <button className="history-button" aria-label="Undo proof step" disabled={busy || undoStack.length === 0} title="Back one proof step" onClick={undo}>←</button>
+          <button className="history-button" aria-label="Redo proof step" disabled={busy || redoStack.length === 0} title="Forward one proof step" onClick={redo}>→</button>
           <button disabled={busy} onClick={exportDocument}>Export</button>
           <button disabled={busy} onClick={() => importInput.current?.click()}>Import</button>
-          <button disabled={busy} onClick={() => void reset()}>Reset</button>
+          <button
+            className={confirmReset ? "confirm-reset" : ""}
+            disabled={busy}
+            onClick={(event) => {
+              event.stopPropagation();
+              requestReset();
+            }}
+          >{confirmReset ? "Confirm reset" : "Reset"}</button>
           <input ref={importInput} hidden type="file" accept="application/json,.json" onChange={(event) => {
             const file = event.target.files?.[0];
             if (file !== undefined) void importDocument(file);
@@ -460,11 +620,16 @@ export function ProofWorkspace() {
             <div className="visual-view" key={state.session.lessonId}>
               <CanvasCard key={`context-${state.session.lessonId}-${currentGoal.id}`} title="Local context" initial={{ x: 22, y: 72 }} className="context-canvas-card">
                 <div className="context-list">
-                  {currentGoal.context.length === 0 ? <small>No variables yet—just compute.</small> : currentGoal.context.map((binding) => <code key={binding}>{binding}</code>)}
+                  {currentGoal.context.length === 0 ? <small>No variables yet—just compute.</small> : currentGoal.context.map((binding) => (
+                    <code
+                      key={binding}
+                      className={preview?.variable !== undefined && binding.startsWith(`${preview.variable} :`) ? "preview-target" : ""}
+                    >{binding}</code>
+                  ))}
                 </div>
                 {currentGoal.hypotheses.map((hypothesis) => (
                   <div
-                    className={`hypothesis-card ${state.moves.some((move) => move.handle === hypothesis.id) ? "tappable" : ""}`}
+                    className={`hypothesis-card ${state.moves.some((move) => move.handle === hypothesis.id) ? "tappable" : ""} ${preview?.handle === hypothesis.id ? "preview-target" : ""}`}
                     draggable
                     key={hypothesis.id}
                     role={state.moves.some((move) => move.handle === hypothesis.id) ? "button" : undefined}
@@ -494,7 +659,7 @@ export function ProofWorkspace() {
                 {analysisMove !== undefined && (
                   <div
                     id="analysis-zone"
-                    className="induction-zone"
+                    className={`induction-zone ${preview !== undefined && (preview.kind === "induction" || preview.kind === "cases") ? "preview-dest" : ""}`}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => {
                       event.preventDefault();
@@ -521,13 +686,13 @@ export function ProofWorkspace() {
                   <>
                     {inductives.map((definition, index) => (
                       <CanvasCard key={`${state.session.lessonId}-${definition.name}`} title={`data ${definition.name}`} anchor="right" initial={{ x: 24, y: columnTop + index * rowGap }} className="definition-canvas-card">
-                        <code>{inductiveToScriptAt(definition, DEFINITION_CARD_CODE_COLUMNS)}</code>
+                        <code><TokenSpans segments={inductiveToSegments(definition, DEFINITION_CARD_CODE_COLUMNS)} /></code>
                         <small>Cases and induction are generated from these constructors.</small>
                       </CanvasCard>
                     ))}
                     {definitions.map((definition, index) => (
                       <CanvasCard key={`${state.session.lessonId}-${definition.name}`} title={`${definition.name} : ${definition.type}`} anchor="right" initial={{ x: 24, y: columnTop + (inductives.length + index) * rowGap }} className="definition-canvas-card">
-                        {definition.clauses.map((clause) => <code key={clause.script}>{clauseToScript(definition.name, clause, DEFINITION_CARD_CODE_COLUMNS)}</code>)}
+                        {definition.clauses.map((clause) => <code key={clause.script}><TokenSpans segments={clauseToSegments(definition.name, clause, DEFINITION_CARD_CODE_COLUMNS)} /></code>)}
                         <small>These equations are the available computation rules.</small>
                       </CanvasCard>
                     ))}
@@ -549,42 +714,48 @@ export function ProofWorkspace() {
                     >=</button>
                     <Expression expression={currentGoal.right} moves={state.moves} onMove={(moveId) => void send({ kind: "apply-move", moveId })} />
                   </span>
-                  {progress.total > 0 && progress.solved === progress.total && (
+                  {solved && (
                     /* Mounts exactly when the last obligation closes, so the stamp-in animation plays once. */
                     <div className="qed-stamp" aria-hidden="true">Q.E.D.</div>
                   )}
                 </div>
               </ScopeBox>
-              {contextualMoves.length > 0 && (
-                <div
-                  className="context-menu"
-                  role="menu"
-                  style={selection === undefined ? undefined : { left: selection.x, top: selection.y }}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <div className="context-menu-title">What do you want to do here?</div>
-                  {contextualMoves.map((move) => (
-                    <button role="menuitem" key={move.id} onClick={() => void send({ kind: "apply-move", moveId: move.id })}>
-                      <span>{move.kind === "cases" ? "⑂" : move.kind === "induction" ? "ℕ" : move.kind === "generalize" ? "∀" : move.kind === "rewrite" ? "⇢" : "↳"}</span>
-                      <div><strong>{move.label}</strong><small>{move.explanation}</small></div>
-                    </button>
-                  ))}
-                  {contextualMoves.some((move) => move.dropTarget !== undefined) && <p>You can also drag this term onto a highlighted target.</p>}
-                </div>
+              {selection !== undefined && contextualMoves.length > 0 && (
+                <MoveContextMenu
+                  moves={contextualMoves}
+                  anchor={{ x: selection.x, y: selection.y }}
+                  onPick={(moveId) => void send({ kind: "apply-move", moveId })}
+                  onClose={closeMenu}
+                  onPreview={setPreview}
+                />
               )}
               <div className="gesture-hint">
-                <span className="cursor-icon">↖</span>
-                {state.moves.some((move) => move.kind === "rewrite")
-                  ? "Drag IH onto the matching recursive call"
-                  : analysisMove !== undefined
-                    ? `Drag ${analysisMove.variable} into the analysis tray`
-                    : "Touch a dotted expression to apply its defining equation"}
+                <span className="cursor-icon">{solved ? "✓" : "↖"}</span>
+                {solved
+                  ? "Proved and kernel-checked. Read it back in the Notebook, or continue."
+                  : state.moves.some((move) => move.kind === "rewrite")
+                    ? "Drag IH onto the matching recursive call"
+                    : analysisMove !== undefined
+                      ? `Drag ${analysisMove.variable} into the analysis tray`
+                      : "Touch a dotted expression to apply its defining equation"}
               </div>
-              <div className="canvas-help"><strong>Why this move?</strong><span>{state.moves[0]?.explanation ?? "Every local obligation is complete."}</span></div>
+              {!solved && <div className="canvas-help"><strong>Suggested move</strong><span>{state.moves[0]?.explanation ?? "Every local obligation is complete."}</span></div>}
               <div className="move-palette">
-                {state.moves.map((move) => (
-                  <button key={move.id} disabled={busy} onClick={() => void send({ kind: "apply-move", moveId: move.id })}>
-                    <span>{move.kind === "reduce" ? "↳" : move.kind === "rewrite" ? "⇢" : move.kind === "generalize" ? "∀" : move.kind === "induction" || move.kind === "cases" ? "⑂" : "✓"}</span>
+                {solved && nextLesson !== undefined && (
+                  <button className="next-lesson" disabled={busy} onClick={() => void startLesson(nextLesson.id)}>
+                    <span>→</span>
+                    <div><strong>Next lesson</strong><small>{nextLesson.title}</small></div>
+                  </button>
+                )}
+                {state.moves.map((move, index) => (
+                  <button
+                    key={move.id}
+                    className={index === 0 ? "suggested" : ""}
+                    disabled={busy}
+                    onClick={() => void send({ kind: "apply-move", moveId: move.id })}
+                    {...previewProps(move)}
+                  >
+                    <span>{moveIcon(move)}</span>
                     <div><strong>{move.label}</strong><small>{move.explanation}</small></div>
                   </button>
                 ))}
@@ -594,7 +765,7 @@ export function ProofWorkspace() {
 
           {view === "notebook" && (
             <div className="notebook-view">
-              <div className="source-cell"><span>theorem</span> {state.session.theorem} :<br />&nbsp;&nbsp;{state.session.statement}</div>
+              <div className="source-cell"><TokenSpans segments={tokenizeScript(`theorem ${state.session.theorem} :\n  ${state.session.statement}`)} /></div>
               {state.session.goals.map((goal) => (
                 <article className="proof-cell" key={goal.id}>
                   <header><span>{goal.status === "solved" ? "✓" : "○"}</span> case {goal.label}</header>
@@ -607,12 +778,12 @@ export function ProofWorkspace() {
           {view === "script" && (
             <div className="script-view">
               <div className="script-caption">Exact dependent proof term checked inside this browser</div>
-              <pre>{state.script}</pre>
+              <pre><TokenSpans segments={tokenizeScript(state.script)} /></pre>
               <p>Every displayed transition is checked by {state.kernelVersion}; completed lessons assemble and recheck the exact closed theorem term. Last local check: {state.evidence.elapsedMs} ms.</p>
             </div>
           )}
           {error !== undefined && <div className="error-toast" role="alert">{error}</div>}
-          {busy && error === undefined && <div className="checking-toast" role="status">{loadingMessage}</div>}
+          {busy && error === undefined && <div className="checking-toast" role="status" aria-live="polite">{loadingMessage}</div>}
         </section>
       </div>
     </main>

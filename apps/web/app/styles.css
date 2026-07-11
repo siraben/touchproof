@@ -299,8 +299,7 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
 /* --- Notebook: vellum sheets on the board -------------------------------------------- */
 .notebook-view { max-width: 830px; margin: 0 auto; text-align: left; }
 .source-cell, .proof-cell { background: var(--grain), linear-gradient(180deg, var(--vellum-hi), var(--vellum-lo)); border: 1px solid var(--vellum-edge); border-radius: 15px; box-shadow: var(--shadow-card); color: var(--ink); }
-.source-cell { padding: 20px 24px; font: 14px/1.75 var(--mono); }
-.source-cell span { color: #8d3f63; font-weight: 700; }
+.source-cell { padding: 20px 24px; font: 14px/1.75 var(--mono); white-space: pre-wrap; }
 .proof-cell { margin-top: 14px; overflow: hidden; }
 .proof-cell header { padding: 12px 17px; border-bottom: 1px solid #e2d9c0; font-weight: 700; }
 .proof-cell header span { color: var(--green); margin-right: 8px; }
@@ -322,6 +321,69 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
 .loading { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); background: var(--board-deep); }
 .loading p { max-width: 580px; text-align: center; line-height: 1.55; }
 .loading button { border: 1px solid var(--hairline); border-radius: 9px; padding: 9px 16px; background: var(--board-raised); color: var(--text); cursor: pointer; }
+
+/* --- Syntax highlighting ---------------------------------------------------------------------
+   Ink-on-vellum token palette (definition cards, notebook source cell); all
+   colors clear 4.5:1 on the vellum gradient. */
+.tok-keyword { color: #a02c15; font-weight: 700; }
+.tok-type { color: #3f5573; }
+.tok-ctor, .tok-number { color: #0b6e97; }
+.tok-fn { color: #1f4e46; font-weight: 600; }
+.tok-operator, .tok-paren { color: #5f5a4a; }
+/* Dark-surface variant on the script view's ink pre */
+.script-view pre .tok-keyword { color: #ff8f76; }
+.script-view pre .tok-type { color: #e2c07a; }
+.script-view pre .tok-ctor, .script-view pre .tok-number { color: #7dd3fc; }
+.script-view pre .tok-fn { color: #7ee2a8; }
+.script-view pre .tok-operator, .script-view pre .tok-paren { color: #8ba3bd; }
+
+/* --- Header reset confirmation ----------------------------------------------------------------- */
+.header-actions > button.confirm-reset { padding: 6px 10px; border-radius: 8px; background: rgba(195, 57, 31, .28); color: #ffb4a1; font-weight: 700; }
+.header-actions > button.confirm-reset:hover { color: #ffcabb; }
+
+/* --- Lesson completion -------------------------------------------------------------------------
+   The palette is empty once every obligation closes; the next-lesson chip
+   takes its place and carries the flow forward. */
+.move-palette .next-lesson { width: 330px; align-items: center; border-color: var(--cyan-strong); box-shadow: var(--shadow-card), 0 0 0 1px rgba(56, 189, 248, .35), 0 0 26px rgba(56, 189, 248, .28); }
+.move-palette .next-lesson > span { color: var(--cyan-ink); font-size: 22px; }
+.move-palette .next-lesson strong { font-size: 15px; }
+
+/* --- Suggested move ------------------------------------------------------------------------------
+   The first chip and the "Suggested move" panel read as one unit. */
+.move-palette button.suggested { position: relative; border-color: rgba(56, 189, 248, .55); }
+.move-palette button.suggested::after { content: "Suggested"; position: absolute; top: -7px; right: 10px; padding: 1px 7px; border: 1px solid rgba(56, 189, 248, .55); border-radius: 999px; background: var(--vellum-hi); color: var(--cyan-ink); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+
+/* --- Context menu flipped above its anchor -------------------------------------------------------- */
+.context-menu.flipped::before { top: auto; bottom: -7px; transform: rotate(225deg); }
+
+/* --- Move preview ----------------------------------------------------------------------------------
+   Hovering or focusing a move chip (palette or context menu) lights up what
+   the move touches: a shimmering highlighter pass on the acted-on subterm,
+   a dashed landing outline on its drop target. Distinct from .selected
+   (steady wash, no glow); static under prefers-reduced-motion. */
+@keyframes preview-shimmer { 50% { box-shadow: 0 0 0 5px rgba(56, 189, 248, .14), 0 0 20px rgba(56, 189, 248, .6); } }
+.expression.preview-target { background: var(--cyan-wash); box-shadow: 0 0 0 5px rgba(56, 189, 248, .3), 0 0 14px rgba(56, 189, 248, .42); animation: preview-shimmer 1.6s ease-in-out infinite; }
+.expression.preview-dest { outline: 2px dashed var(--cyan-strong); outline-offset: 3px; }
+.context-list code.preview-target,
+.hypothesis-card.preview-target { box-shadow: 0 0 0 2px rgba(56, 189, 248, .55), 0 0 16px rgba(56, 189, 248, .35); animation: preview-shimmer 1.6s ease-in-out infinite; }
+.induction-zone.preview-dest { border-color: var(--cyan-strong); background: rgba(56, 189, 248, .1); box-shadow: 0 0 16px rgba(56, 189, 248, .25); }
+
+/* --- Themed scrollbars ------------------------------------------------------------------------------
+   Standard properties first; ::-webkit-* for older Chromium. Slate-cyan
+   thumbs on dark surfaces, ink thumbs on vellum; no track chrome. */
+.proof-stage, .context-panel, .script-view pre, .move-palette, .equation-card, .canvas-card-body { scrollbar-width: thin; }
+.proof-stage, .context-panel, .script-view pre { scrollbar-color: rgba(125, 211, 252, .25) transparent; }
+.move-palette, .equation-card, .canvas-card-body { scrollbar-color: rgba(93, 107, 102, .5) transparent; }
+.proof-stage::-webkit-scrollbar, .context-panel::-webkit-scrollbar, .script-view pre::-webkit-scrollbar,
+.move-palette::-webkit-scrollbar, .equation-card::-webkit-scrollbar, .canvas-card-body::-webkit-scrollbar { width: 10px; height: 10px; }
+.proof-stage::-webkit-scrollbar-track, .context-panel::-webkit-scrollbar-track, .script-view pre::-webkit-scrollbar-track,
+.move-palette::-webkit-scrollbar-track, .equation-card::-webkit-scrollbar-track, .canvas-card-body::-webkit-scrollbar-track { background: transparent; }
+.proof-stage::-webkit-scrollbar-corner, .context-panel::-webkit-scrollbar-corner, .script-view pre::-webkit-scrollbar-corner,
+.move-palette::-webkit-scrollbar-corner, .equation-card::-webkit-scrollbar-corner, .canvas-card-body::-webkit-scrollbar-corner { background: transparent; }
+.proof-stage::-webkit-scrollbar-thumb, .context-panel::-webkit-scrollbar-thumb, .script-view pre::-webkit-scrollbar-thumb { background: rgba(125, 211, 252, .16); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.proof-stage::-webkit-scrollbar-thumb:hover, .context-panel::-webkit-scrollbar-thumb:hover, .script-view pre::-webkit-scrollbar-thumb:hover { background: rgba(125, 211, 252, .34); border: 2px solid transparent; background-clip: padding-box; }
+.move-palette::-webkit-scrollbar-thumb, .equation-card::-webkit-scrollbar-thumb, .canvas-card-body::-webkit-scrollbar-thumb { background: rgba(93, 107, 102, .38); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.move-palette::-webkit-scrollbar-thumb:hover, .equation-card::-webkit-scrollbar-thumb:hover, .canvas-card-body::-webkit-scrollbar-thumb:hover { background: rgba(93, 107, 102, .6); border: 2px solid transparent; background-clip: padding-box; }
 
 /* --- Motion safety --------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
@@ -353,4 +415,5 @@ h1 { margin: 5px 0 0; font: 650 30px/1.1 var(--sans); letter-spacing: -.03em; co
      the 720px canvas cannot clear canvas-help, so keep the palette as the
      original right-anchored single column here. */
   .move-palette { left: auto; right: 20px; transform: none; flex-flow: column nowrap; width: 250px; }
+  .move-palette .next-lesson { width: 250px; }
 }

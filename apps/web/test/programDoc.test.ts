@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { inductiveDefinitions, inductiveToScript, programDefinitions } from "@touchproof/core";
-import { cat, group, line, nest, render, text } from "../lib/doc";
-import { clauseToScript, inductiveToScriptAt } from "../lib/programDoc";
+import { inductiveDefinitions, inductiveToScript, parseProgramExpr, programDefinitions } from "@touchproof/core";
+import { annotate, cat, group, line, nest, render, renderSegments, text } from "../lib/doc";
+import { clauseToScript, clauseToSegments, exprToDoc, expressionShape, inductiveToScriptAt } from "../lib/programDoc";
+import { tokenizeScript } from "../lib/scriptTokens";
 
 describe("doc combinators", () => {
   const document = group(cat(text("lhs ="), nest(2, cat(line, text("a really long right hand side")))));
@@ -41,5 +42,53 @@ describe("program documents", () => {
     const definition = programDefinitions.find((item) => item.name === "revAcc")!;
     const cons = definition.clauses.find((clause) => clause.label === "cons")!;
     expect(clauseToScript(definition.name, cons, 36)).toBe("revAcc (x :: xs) acc =\n  revAcc xs (x :: acc)");
+  });
+
+  it("parenthesizes nested infix operands (the lesson-12 associativity shape)", () => {
+    expect(render(exprToDoc(parseProgramExpr("add(add(a, b), c)")), 80)).toBe("(a + b) + c");
+    expect(render(exprToDoc(parseProgramExpr("add(a, add(b, c))")), 80)).toBe("a + (b + c)");
+    // The DOM renderer derives its parens from the same shape classification.
+    expect(expressionShape(parseProgramExpr("add(a, b)"), { listLiterals: false })).toBe("binary");
+    expect(expressionShape(parseProgramExpr("cons(x, nil)"), { listLiterals: false })).toBe("binary");
+    expect(expressionShape(parseProgramExpr("cons(x, nil)"), { listLiterals: true })).toBe("atom");
+    expect(expressionShape(parseProgramExpr("rev(xs)"), { listLiterals: false })).toBe("application");
+  });
+});
+
+describe("annotated rendering", () => {
+  it("keeps layout unchanged and reports the innermost tag", () => {
+    const doc = group(cat(annotate("fn", text("rev")), nest(2, cat(line, annotate("outer", cat(text("a"), annotate("ctor", text("[]"))))))));
+    expect(renderSegments(doc, 80)).toEqual([
+      { text: "rev", tag: "fn" },
+      { text: " " },
+      { text: "a", tag: "outer" },
+      { text: "[]", tag: "ctor" },
+    ]);
+    expect(render(doc, 80)).toBe("rev a[]");
+  });
+
+  it("concatenates every clause's segments to its plain rendering", () => {
+    for (const definition of programDefinitions) {
+      for (const clause of definition.clauses) {
+        const segments = clauseToSegments(definition.name, clause, 36);
+        expect(segments.map((segment) => segment.text).join("")).toBe(clauseToScript(definition.name, clause, 36));
+      }
+    }
+  });
+
+  it("tags a clause's tokens for highlighting", () => {
+    const rev = programDefinitions.find((item) => item.name === "rev")!;
+    const cons = rev.clauses.find((clause) => clause.label === "cons")!;
+    const segments = clauseToSegments(rev.name, cons, 80);
+    expect(segments.find((segment) => segment.text === "rev")?.tag).toBe("fn");
+    expect(segments.some((segment) => segment.tag === "operator")).toBe(true);
+  });
+
+  it("tokenizes proof scripts losslessly", () => {
+    const script = "(λ n : Nat, refl (add n 0))\n: (Π n : Nat, ((add n 0) = n))";
+    const tokens = tokenizeScript(script);
+    expect(tokens.map((token) => token.text).join("")).toBe(script);
+    expect(tokens.find((token) => token.text.includes("λ"))?.tag).toBe("keyword");
+    expect(tokens.find((token) => token.text.includes("Nat"))?.tag).toBe("type");
   });
 });
