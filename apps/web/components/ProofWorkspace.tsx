@@ -4,7 +4,6 @@ import {
   definitionByName,
   decodeProofSession,
   inductiveByName,
-  inductiveToScript,
   type ProgramExpr,
   type ProofMove,
 } from "@touchproof/core";
@@ -15,12 +14,17 @@ import {
   type ProofSnapshot,
   type ProgressListener,
 } from "@/lib/proof/browserProofBackend";
+import { clauseToScript, inductiveToScriptAt } from "@/lib/programDoc";
 import { dropMove, movesForHandle, proofProgress } from "@/lib/viewModel";
 
 type View = "visual" | "notebook" | "script";
 
 const backend = browserProofBackend();
 const MAX_DOCUMENT_BYTES = 200_000;
+// Definition-card code column budget: the card body is 285px wide minus
+// 2 x 11px padding = 263px; at 12px ui-monospace (~0.6em = 7.2px advance)
+// that is ~36 characters, with the pretty-printer breaking anything longer.
+const DEFINITION_CARD_CODE_COLUMNS = 36;
 
 function progressText(progress: Parameters<ProgressListener>[0]): string {
   return progress.phase === "checking" ? "The TouchProof kernel is checking this proof…" : "Checking proof…";
@@ -34,23 +38,51 @@ const SelectionContext = createContext<{
 function CanvasCard({
   title,
   initial,
+  anchor = "left",
   className = "",
   children,
 }: {
   title: string;
+  // For anchor "left" this is the left/top offset; for "right" it is the
+  // right/top offset (distance from the right edge of the offsetParent).
   initial: { x: number; y: number };
+  anchor?: "left" | "right";
   className?: string;
   children: React.ReactNode;
 }) {
-  const [position, setPosition] = useState(initial);
+  // A right-anchored card floats against the right edge until the user first
+  // drags it. On drag start we measure its box against the offsetParent and
+  // convert to absolute left/top so it never overlaps the centered equation.
+  const [position, setPosition] = useState<{ x: number; y: number } | undefined>(
+    anchor === "left" ? initial : undefined,
+  );
+  const cardRef = useRef<HTMLElement>(null);
   const drag = useRef<{ pointerId: number; dx: number; dy: number } | undefined>(undefined);
+  const style =
+    position === undefined
+      ? { right: initial.x, top: initial.y }
+      : { left: position.x, top: position.y };
   return (
-    <section className={`canvas-card ${className}`} style={{ left: position.x, top: position.y }} onClick={(event) => event.stopPropagation()}>
+    <section ref={cardRef} className={`canvas-card ${className}`} style={style} onClick={(event) => event.stopPropagation()}>
       <header
         className="canvas-card-handle"
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
-          drag.current = { pointerId: event.pointerId, dx: event.clientX - position.x, dy: event.clientY - position.y };
+          // Resolve the current on-screen position so a right-anchored card
+          // keeps its exact spot at the moment the drag begins.
+          let current = position;
+          if (current === undefined && cardRef.current !== null) {
+            const parent = cardRef.current.offsetParent as HTMLElement | null;
+            const cardRect = cardRef.current.getBoundingClientRect();
+            const parentRect = parent?.getBoundingClientRect();
+            current = {
+              x: cardRect.left - (parentRect?.left ?? 0),
+              y: cardRect.top - (parentRect?.top ?? 0),
+            };
+            setPosition(current);
+          }
+          const base = current ?? initial;
+          drag.current = { pointerId: event.pointerId, dx: event.clientX - base.x, dy: event.clientY - base.y };
         }}
         onPointerMove={(event) => {
           if (drag.current?.pointerId !== event.pointerId) return;
@@ -84,15 +116,17 @@ function Expression({
       if (expression.name === "nil") return "[]";
       if (expression.name === "zero") return "0";
       if (expression.name === "succ" && expression.args.length === 1) {
-        return <><span className="function-name">S</span><span className="paren"> (</span><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
+        // NBSP join ("\u00A0"): a function head is never split from its argument.
+        return <><span className="function-name">S</span><span className="paren">{"\u00A0("}</span><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
       }
       if (expression.name === "cons" && expression.args.length === 2) {
-        return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator"> :: </span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
+        // Breakable space BEFORE the operator, NBSP after: a wrapped operator starts the continuation line.
+        return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{" ::\u00A0"}</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
       }
-      return <>{expression.name} {expression.args.map((arg) => <Expression key={arg.id} expression={arg} moves={moves} onMove={onMove} />)}</>;
+      return <>{expression.name}{"\u00A0"}{expression.args.map((arg) => <Expression key={arg.id} expression={arg} moves={moves} onMove={onMove} />)}</>;
     }
     if (expression.name === "compose" && expression.args.length === 2) {
-      return <><span className="paren">(</span><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator"> ∘ </span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
+      return <><span className="paren">(</span><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{" ∘\u00A0"}</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
     }
     if (expression.name === "apply" && expression.args.length === 2) {
       return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="paren">(</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /><span className="paren">)</span></>;
@@ -116,7 +150,7 @@ function Expression({
       return <><span className="function-name">revAcc</span><span className="argument"><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /></span><span className="argument">(<Expression expression={expression.args[1]!} moves={moves} onMove={onMove} />)</span></>;
     }
     if ((expression.name === "add" || expression.name === "append") && expression.args.length === 2) {
-      return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator"> {expression.name === "add" ? "+" : "++"} </span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
+      return <><Expression expression={expression.args[0]!} moves={moves} onMove={onMove} /><span className="operator">{expression.name === "add" ? " +\u00A0" : " ++\u00A0"}</span><Expression expression={expression.args[1]!} moves={moves} onMove={onMove} /></>;
     }
     return <><span className="function-name">{expression.name}</span>{expression.args.map((arg) => <span className="argument" key={arg.id}><Expression expression={arg} moves={moves} onMove={onMove} /></span>)}</>;
   })();
@@ -473,29 +507,47 @@ export function ProofWorkspace() {
                   </div>
                 )}
               </CanvasCard>
-              {state.session.inductiveNames.map(inductiveByName).filter((definition) => definition !== undefined).map((definition, index) => (
-                <CanvasCard key={`${state.session.lessonId}-${definition.name}`} title={`data ${definition.name}`} initial={{ x: 830, y: 72 + index * 175 }} className="definition-canvas-card">
-                  <code>{inductiveToScript(definition)}</code>
-                  <small>Cases and induction are generated from these constructors.</small>
-                </CanvasCard>
-              ))}
-              {state.session.definitionNames.map(definitionByName).filter((definition) => definition !== undefined).map((definition, index) => (
-                <CanvasCard key={`${state.session.lessonId}-${definition.name}`} title={`${definition.name} : ${definition.type}`} initial={{ x: 830, y: 247 + index * 175 }} className="definition-canvas-card">
-                  {definition.clauses.map((clause) => <code key={clause.script}>{clause.script}</code>)}
-                  <small>These equations are the available computation rules.</small>
-                </CanvasCard>
-              ))}
+              {(() => {
+                const inductives = state.session.inductiveNames.map(inductiveByName).filter((definition) => definition !== undefined);
+                const definitions = state.session.definitionNames.map(definitionByName).filter((definition) => definition !== undefined);
+                // Right-anchored side column: 24px from the right edge, cards
+                // stacked from the top with compact fixed spacing. Definitions
+                // continue the same column below the inductive cards so the two
+                // groups never overlap the move palette or each other.
+                const columnTop = 72;
+                const rowGap = 150;
+                return (
+                  <>
+                    {inductives.map((definition, index) => (
+                      <CanvasCard key={`${state.session.lessonId}-${definition.name}`} title={`data ${definition.name}`} anchor="right" initial={{ x: 24, y: columnTop + index * rowGap }} className="definition-canvas-card">
+                        <code>{inductiveToScriptAt(definition, DEFINITION_CARD_CODE_COLUMNS)}</code>
+                        <small>Cases and induction are generated from these constructors.</small>
+                      </CanvasCard>
+                    ))}
+                    {definitions.map((definition, index) => (
+                      <CanvasCard key={`${state.session.lessonId}-${definition.name}`} title={`${definition.name} : ${definition.type}`} anchor="right" initial={{ x: 24, y: columnTop + (inductives.length + index) * rowGap }} className="definition-canvas-card">
+                        {definition.clauses.map((clause) => <code key={clause.script}>{clauseToScript(definition.name, clause, DEFINITION_CARD_CODE_COLUMNS)}</code>)}
+                        <small>These equations are the available computation rules.</small>
+                      </CanvasCard>
+                    ))}
+                  </>
+                );
+              })()}
               <div className="case-label">Current obligation · {currentGoal.label}</div>
               <ScopeBox variables={state.session.generalizedVariables}>
                 <div className={`equation-card ${busy ? "busy" : ""}`} onClick={(event) => event.stopPropagation()}>
                   <Expression expression={currentGoal.left} moves={state.moves} onMove={(moveId) => void send({ kind: "apply-move", moveId })} />
-                  <button
-                    className={`equals ${closeMove === undefined ? "" : "closable"}`}
-                    disabled={closeMove === undefined || busy}
-                    title={closeMove === undefined ? "Keep transforming until both sides match" : "Close by reflexivity"}
-                    onClick={() => closeMove !== undefined && void send({ kind: "apply-move", moveId: closeMove.id })}
-                  >=</button>
-                  <Expression expression={currentGoal.right} moves={state.moves} onMove={(moveId) => void send({ kind: "apply-move", moveId })} />
+                  {/* The = stays glued to the start of the RHS: when the card is too
+                      narrow for one line, this whole group wraps as the second line. */}
+                  <span className="equation-rhs">
+                    <button
+                      className={`equals ${closeMove === undefined ? "" : "closable"}`}
+                      disabled={closeMove === undefined || busy}
+                      title={closeMove === undefined ? "Keep transforming until both sides match" : "Close by reflexivity"}
+                      onClick={() => closeMove !== undefined && void send({ kind: "apply-move", moveId: closeMove.id })}
+                    >=</button>
+                    <Expression expression={currentGoal.right} moves={state.moves} onMove={(moveId) => void send({ kind: "apply-move", moveId })} />
+                  </span>
                 </div>
               </ScopeBox>
               {contextualMoves.length > 0 && (
