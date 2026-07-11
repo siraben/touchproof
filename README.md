@@ -24,8 +24,8 @@ over that variable.
 
 Every action is checked locally by TouchProof's small TypeScript dependent type
 theory kernel. Its core terms include predicative universes, dependent function
-types, lambdas, application, equality, reflexivity, equality elimination, and
-strictly-positive inductive recursors. Boolean, natural-number, and list
+types, lambdas, application, local definitions, equality, reflexivity, equality
+elimination, and parameterized strictly-positive inductive recursors. Boolean, natural-number, and list
 functions compile to recursors; their computation laws are definitional.
 Symmetry, transitivity, congruence, induction principles, and prerequisite list
 theorems are stored as checked terms rather than assumptions.

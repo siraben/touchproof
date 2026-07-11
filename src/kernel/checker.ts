@@ -35,12 +35,18 @@ export interface InductiveConstructor {
 export interface InductiveDeclaration {
   readonly name: string;
   readonly level: number;
+  readonly parameters: readonly ConstructorField[];
   readonly constructors: readonly InductiveConstructor[];
 }
 
 export interface ConstructorInput {
   readonly name: string;
   readonly fields: readonly Readonly<{ readonly name: string; readonly type: Term }>[];
+}
+
+export interface InductiveParameterInput {
+  readonly name: string;
+  readonly type: Term;
 }
 
 export type Environment = ReadonlyMap<string, Declaration>;
@@ -51,6 +57,12 @@ export class KernelError extends Error {
     super(message);
     this.name = "KernelError";
   }
+}
+
+function substituteMany(term: Term, replacements: ReadonlyMap<string, Term>): Term {
+  let result = term;
+  for (const [name, value] of replacements) result = substitute(result, name, value);
+  return result;
 }
 
 export function normalize(term: Term, environment: Environment): Term {
@@ -66,6 +78,8 @@ export function normalize(term: Term, environment: Environment): Term {
       return pi(term.param, normalize(term.domain, environment), normalize(term.codomain, environment));
     case "lam":
       return { ...term, paramType: normalize(term.paramType, environment), body: normalize(term.body, environment) };
+    case "let":
+      return normalize(substitute(term.body, term.name, normalize(term.value, environment)), environment);
     case "app": {
       const fn = normalize(term.fn, environment);
       const arg = normalize(term.arg, environment);
@@ -90,11 +104,16 @@ export function normalize(term: Term, environment: Environment): Term {
           const inductive = environment.get(term.inductive)?.inductive;
           const shape = inductive?.constructors[constructor.index];
           const branch = term.cases[constructor.index];
-          if (shape !== undefined && branch !== undefined && application.args.length === shape.fields.length) {
+          const parameterCount = inductive?.parameters.length ?? 0;
+          const constructorParameters = application.args.slice(0, parameterCount);
+          const fields = application.args.slice(parameterCount);
+          const parametersMatch = constructorParameters.length === term.parameters.length
+            && constructorParameters.every((parameter, index) => definitionallyEqual(parameter, term.parameters[index]!, environment));
+          if (shape !== undefined && branch !== undefined && parametersMatch && fields.length === shape.fields.length) {
             const recursiveResults = shape.fields.flatMap((field, index) => field.recursive
-              ? [recursor(term.inductive, term.motive, term.cases, application.args[index]!)]
+              ? [recursor(term.inductive, term.motive, term.cases, fields[index]!, term.parameters)]
               : []);
-            return normalize(apps(branch, ...application.args, ...recursiveResults), environment);
+            return normalize(apps(branch, ...fields, ...recursiveResults), environment);
           }
         }
       }
@@ -103,6 +122,7 @@ export function normalize(term: Term, environment: Environment): Term {
         normalize(term.motive, environment),
         term.cases.map((branch) => normalize(branch, environment)),
         target,
+        term.parameters.map((parameter) => normalize(parameter, environment)),
       );
     }
     case "subst": {
@@ -158,10 +178,22 @@ function alphaEqual(
     case "refl": return right.kind === "refl" && alphaEqual(left.value, right.value, leftBound, rightBound, depth);
     case "recursor":
       return right.kind === "recursor" && left.inductive === right.inductive
+        && left.parameters.length === right.parameters.length
+        && left.parameters.every((parameter, index) => alphaEqual(parameter, right.parameters[index]!, leftBound, rightBound, depth))
         && alphaEqual(left.motive, right.motive, leftBound, rightBound, depth)
         && left.cases.length === right.cases.length
         && left.cases.every((branch, index) => alphaEqual(branch, right.cases[index]!, leftBound, rightBound, depth))
         && alphaEqual(left.target, right.target, leftBound, rightBound, depth);
+    case "let": {
+      if (right.kind !== "let"
+        || !alphaEqual(left.valueType, right.valueType, leftBound, rightBound, depth)
+        || !alphaEqual(left.value, right.value, leftBound, rightBound, depth)) return false;
+      const nextLeft = new Map(leftBound);
+      const nextRight = new Map(rightBound);
+      nextLeft.set(left.name, depth);
+      nextRight.set(right.name, depth);
+      return alphaEqual(left.body, right.body, nextLeft, nextRight, depth + 1);
+    }
     case "subst":
       return right.kind === "subst" && alphaEqual(left.proof, right.proof, leftBound, rightBound, depth)
         && alphaEqual(left.motive, right.motive, leftBound, rightBound, depth)
@@ -225,6 +257,13 @@ export function infer(term: Term, context: Context, environment: Environment): T
       inner.set(term.param, term.paramType);
       return pi(term.param, term.paramType, infer(term.body, inner, environment));
     }
+    case "let": {
+      universeOf(term.valueType, context, environment);
+      check(term.value, term.valueType, context, environment);
+      const inner = new Map(context);
+      inner.set(term.name, term.valueType);
+      return substitute(infer(term.body, inner, environment), term.name, term.value);
+    }
     case "app": {
       const fnType = normalize(infer(term.fn, context, environment), environment);
       if (fnType.kind !== "pi") {
@@ -245,7 +284,16 @@ export function infer(term: Term, context: Context, environment: Environment): T
     case "recursor": {
       const declaration = environment.get(term.inductive)?.inductive;
       if (declaration === undefined) throw new KernelError(`unknown inductive type ${term.inductive}`);
-      const inductiveType = constant(term.inductive);
+      if (term.parameters.length !== declaration.parameters.length) {
+        throw new KernelError(`the ${term.inductive} recursor requires ${declaration.parameters.length} parameters`);
+      }
+      const parameterSubstitutions = new Map<string, Term>();
+      for (const [index, parameter] of declaration.parameters.entries()) {
+        const expected = substituteMany(parameter.type, parameterSubstitutions);
+        check(term.parameters[index]!, expected, context, environment);
+        parameterSubstitutions.set(parameter.name, term.parameters[index]!);
+      }
+      const inductiveType = apps(constant(term.inductive), ...term.parameters);
       check(term.target, inductiveType, context, environment);
       const motiveType = normalize(infer(term.motive, context, environment), environment);
       if (motiveType.kind !== "pi" || !definitionallyEqual(motiveType.domain, inductiveType, environment)) {
@@ -256,13 +304,14 @@ export function infer(term: Term, context: Context, environment: Environment): T
         throw new KernelError(`the ${term.inductive} recursor requires ${declaration.constructors.length} cases`);
       }
       for (const [index, constructor] of declaration.constructors.entries()) {
-        const fieldVariables = constructor.fields.map((field) => variable(field.name));
-        const constructorValue = apps(constant(constructor.name), ...fieldVariables);
+        const fields = constructor.fields.map((field) => ({ ...field, type: substituteMany(field.type, parameterSubstitutions) }));
+        const fieldVariables = fields.map((field) => variable(field.name));
+        const constructorValue = apps(constant(constructor.name), ...term.parameters, ...fieldVariables);
         let expected = app(term.motive, constructorValue);
-        for (const field of [...constructor.fields.filter((candidate) => candidate.recursive)].reverse()) {
+        for (const field of [...fields.filter((candidate) => candidate.recursive)].reverse()) {
           expected = pi(`ih_${field.name}`, app(term.motive, variable(field.name)), expected);
         }
-        for (const field of [...constructor.fields].reverse()) expected = pi(field.name, field.type, expected);
+        for (const field of [...fields].reverse()) expected = pi(field.name, field.type, expected);
         check(term.cases[index]!, expected, context, environment);
       }
       return app(term.motive, term.target);
@@ -322,10 +371,11 @@ function containsConstant(term: Term, name: string): boolean {
     case "const": return term.name === name;
     case "pi": return containsConstant(term.domain, name) || containsConstant(term.codomain, name);
     case "lam": return containsConstant(term.paramType, name) || containsConstant(term.body, name);
+    case "let": return containsConstant(term.valueType, name) || containsConstant(term.value, name) || containsConstant(term.body, name);
     case "app": return containsConstant(term.fn, name) || containsConstant(term.arg, name);
     case "eq": return containsConstant(term.type, name) || containsConstant(term.left, name) || containsConstant(term.right, name);
     case "refl": return containsConstant(term.value, name);
-    case "recursor": return term.inductive === name || containsConstant(term.motive, name)
+    case "recursor": return term.inductive === name || term.parameters.some((parameter) => containsConstant(parameter, name)) || containsConstant(term.motive, name)
       || term.cases.some((branch) => containsConstant(branch, name)) || containsConstant(term.target, name);
     case "subst": return containsConstant(term.proof, name) || containsConstant(term.motive, name) || containsConstant(term.value, name);
   }
@@ -342,14 +392,37 @@ export function declareInductive(
   environment: Environment,
   level = 0,
 ): Environment {
+  return declareParameterizedInductive(name, [], constructors, environment, level);
+}
+
+/** Declare a non-indexed inductive family with explicit datatype parameters. */
+export function declareParameterizedInductive(
+  name: string,
+  parameters: readonly InductiveParameterInput[],
+  constructors: readonly ConstructorInput[],
+  environment: Environment,
+  level = 0,
+): Environment {
   if (environment.has(name)) throw new KernelError(`duplicate declaration ${name}`);
+  const parameterContext = new Map<string, Term>();
+  const parameterNames = new Set<string>();
+  for (const parameter of parameters) {
+    if (parameterNames.has(parameter.name)) throw new KernelError(`duplicate parameter ${parameter.name} in ${name}`);
+    parameterNames.add(parameter.name);
+    universeOf(parameter.type, parameterContext, environment);
+    parameterContext.set(parameter.name, parameter.type);
+  }
+  const parameterFields: ConstructorField[] = parameters.map((parameter) => ({ ...parameter, recursive: false }));
+  const parameterVariables = parameters.map((parameter) => variable(parameter.name));
+  const appliedInductive = apps(constant(name), ...parameterVariables);
+  const inductiveType = parameters.reduceRight<Term>((result, parameter) => pi(parameter.name, parameter.type, result), { kind: "type", level });
   const names = new Set<string>();
   const shapes: InductiveConstructor[] = [];
-  let provisional: Environment = new Map(environment).set(name, { type: { kind: "type", level } });
+  let provisional: Environment = new Map(environment).set(name, { type: inductiveType });
   for (const constructor of constructors) {
     if (names.has(constructor.name) || provisional.has(constructor.name)) throw new KernelError(`duplicate constructor ${constructor.name}`);
     names.add(constructor.name);
-    const context = new Map<string, Term>();
+    const context = new Map(parameterContext);
     const fieldNames = new Set<string>();
     const fields: ConstructorField[] = [];
     for (const field of constructor.fields) {
@@ -357,22 +430,23 @@ export function declareInductive(
       fieldNames.add(field.name);
       const fieldLevel = universeOf(field.type, context, provisional);
       if (fieldLevel > level) throw new KernelError(`constructor ${constructor.name} has a field above Type ${level}`);
-      const recursive = definitionallyEqual(field.type, constant(name), provisional);
+      const recursive = definitionallyEqual(field.type, appliedInductive, provisional);
       if (!recursive && containsConstant(field.type, name)) {
         throw new KernelError(`constructor ${constructor.name} is not strictly positive`);
       }
       fields.push({ ...field, recursive });
       context.set(field.name, field.type);
     }
-    const constructorType = fields.reduceRight<Term>((result, field) => pi(field.name, field.type, result), constant(name));
+    const fieldsType = fields.reduceRight<Term>((result, field) => pi(field.name, field.type, result), appliedInductive);
+    const constructorType = parameters.reduceRight<Term>((result, parameter) => pi(parameter.name, parameter.type, result), fieldsType);
     provisional = new Map(provisional).set(constructor.name, {
       type: constructorType,
       constructorInfo: { inductive: name, index: shapes.length },
     });
     shapes.push({ name: constructor.name, fields });
   }
-  const inductive: InductiveDeclaration = { name, level, constructors: shapes };
+  const inductive: InductiveDeclaration = { name, level, parameters: parameterFields, constructors: shapes };
   const result = new Map(provisional);
-  result.set(name, { type: { kind: "type", level }, inductive });
+  result.set(name, { type: inductiveType, inductive });
   return result;
 }

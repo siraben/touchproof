@@ -17,16 +17,18 @@ from the same generic engine used for user-authored documents.
 `src/kernel/term.ts` defines the core calculus:
 
 - predicative `Type u` universes;
-- dependent `Π` types, annotated lambdas, and application;
+- dependent `Π` types, annotated lambdas, application, and local `let` terms;
 - intensional equality, reflexivity, and equality elimination;
 - generic recursor terms for registered inductive types.
 
 `src/kernel/checker.ts` owns capture-avoiding substitution, alpha-safe
 conversion, beta/delta/iota reduction, inference, checking, declaration
 validation, and inductive positivity. Inductive declarations are append-only.
+Datatype parameters are explicit and checked before constructor fields.
 Constructor fields cannot escape the datatype's universe or contain a recursive
 occurrence outside a direct strictly-positive field. Recursor motives and every
-constructor branch are checked before elimination is accepted.
+constructor branch are checked before elimination is accepted. Conversion
+implements beta, delta, iota, and zeta reduction.
 
 The standard environment is constructed only through these checking paths.
 Programs such as negation, addition, append, map, reverse, and accumulator

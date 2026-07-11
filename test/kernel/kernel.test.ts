@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { check, checkDeclaration, declareInductive, definitionallyEqual, infer, KernelError, normalize } from "../../src/kernel/checker.js";
-import { app, constant, equal, lambda, pi, recursor, refl, subst, type, variable } from "../../src/kernel/term.js";
+import { check, checkDeclaration, declareInductive, declareParameterizedInductive, definitionallyEqual, infer, KernelError, normalize } from "../../src/kernel/checker.js";
+import { app, apps, constant, equal, lambda, letIn, pi, recursor, refl, subst, type, variable } from "../../src/kernel/term.js";
 import {
   addZeroRightProof,
   appendNilRightProof,
@@ -24,6 +24,22 @@ describe("dependent kernel", () => {
 
     const reduced = normalize(app(lambda("x", type(0), variable("x")), type(0)), new Map());
     expect(definitionallyEqual(reduced, type(0), new Map())).toBe(true);
+  });
+
+  it("checks local definitions and computes by zeta reduction", () => {
+    const environment = declareInductive("Bit", [
+      { name: "low", fields: [] },
+      { name: "high", fields: [] },
+    ], new Map());
+    const identityType = pi("x", constant("Bit"), constant("Bit"));
+    const term = letIn(
+      "identity",
+      identityType,
+      lambda("x", constant("Bit"), variable("x")),
+      app(variable("identity"), constant("high")),
+    );
+    expect(definitionallyEqual(term, constant("high"), environment)).toBe(true);
+    expect(definitionallyEqual(infer(term, new Map(), environment), constant("Bit"), environment)).toBe(true);
   });
 
   it("checks equality elimination and reduces subst over reflexivity", () => {
@@ -54,6 +70,28 @@ describe("dependent kernel", () => {
     const flipped = recursor("Bit", motive, [constant("on"), constant("off")], constant("off"));
     expect(definitionallyEqual(flipped, constant("on"), environment)).toBe(true);
     expect(() => infer(flipped, new Map(), environment)).not.toThrow();
+  });
+
+  it("declares and eliminates a parameterized datatype", () => {
+    let environment = declareInductive("Element", [{ name: "element", fields: [] }], new Map());
+    environment = declareParameterizedInductive("Option", [{ name: "A", type: type(0) }], [
+      { name: "none", fields: [] },
+      { name: "some", fields: [{ name: "value", type: variable("A") }] },
+    ], environment);
+    const elementType = constant("Element");
+    const element = constant("element");
+    const someElement = apps(constant("some"), elementType, element);
+    const extracted = recursor(
+      "Option",
+      lambda("_", apps(constant("Option"), elementType), elementType),
+      [element, lambda("value", elementType, variable("value"))],
+      someElement,
+      [elementType],
+    );
+    expect(definitionallyEqual(extracted, element, environment)).toBe(true);
+    expect(definitionallyEqual(infer(extracted, new Map(), environment), elementType, environment)).toBe(true);
+    expect(() => infer(recursor("Option", lambda("_", apps(constant("Option"), elementType), elementType), [element, lambda("value", elementType, variable("value"))], someElement), new Map(), environment))
+      .toThrow(KernelError);
   });
 
   it("supports empty inductives and rejects malformed declarations", () => {

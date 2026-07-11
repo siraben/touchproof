@@ -14,12 +14,20 @@ export type Term =
       readonly paramType: Term;
       readonly body: Term;
     }
+  | {
+      readonly kind: "let";
+      readonly name: string;
+      readonly valueType: Term;
+      readonly value: Term;
+      readonly body: Term;
+    }
   | { readonly kind: "app"; readonly fn: Term; readonly arg: Term }
   | { readonly kind: "eq"; readonly type: Term; readonly left: Term; readonly right: Term }
   | { readonly kind: "refl"; readonly value: Term }
   | {
       readonly kind: "recursor";
       readonly inductive: string;
+      readonly parameters: readonly Term[];
       readonly motive: Term;
       readonly cases: readonly Term[];
       readonly target: Term;
@@ -47,6 +55,13 @@ export const lambda = (param: string, paramType: Term, body: Term): Term => ({
   paramType,
   body,
 });
+export const letIn = (name: string, valueType: Term, value: Term, body: Term): Term => ({
+  kind: "let",
+  name,
+  valueType,
+  value,
+  body,
+});
 export const app = (fn: Term, arg: Term): Term => ({ kind: "app", fn, arg });
 export const apps = (fn: Term, ...args: Term[]): Term => args.reduce(app, fn);
 export const equal = (valueType: Term, left: Term, right: Term): Term => ({
@@ -61,7 +76,8 @@ export const recursor = (
   motive: Term,
   cases: readonly Term[],
   target: Term,
-): Term => ({ kind: "recursor", inductive, motive, cases, target });
+  parameters: readonly Term[] = [],
+): Term => ({ kind: "recursor", inductive, parameters, motive, cases, target });
 export const subst = (proof: Term, motive: Term, value: Term): Term => ({
   kind: "subst",
   proof,
@@ -87,6 +103,14 @@ export function freeVariables(term: Term, bound: Set<string> = new Set<string>()
         visit(current.kind === "pi" ? current.codomain : current.body, inner);
         return;
       }
+      case "let": {
+        visit(current.valueType, scope);
+        visit(current.value, scope);
+        const inner = new Set(scope);
+        inner.add(current.name);
+        visit(current.body, inner);
+        return;
+      }
       case "app":
         visit(current.fn, scope);
         visit(current.arg, scope);
@@ -100,6 +124,7 @@ export function freeVariables(term: Term, bound: Set<string> = new Set<string>()
         visit(current.value, scope);
         return;
       case "recursor":
+        current.parameters.forEach((parameter) => visit(parameter, scope));
         visit(current.motive, scope);
         current.cases.forEach((branch) => visit(branch, scope));
         visit(current.target, scope);
@@ -138,7 +163,21 @@ export function substitute(term: Term, name: string, replacement: Term): Term {
       case "refl":
         return refl(go(current.value));
       case "recursor":
-        return recursor(current.inductive, go(current.motive), current.cases.map(go), go(current.target));
+        return recursor(current.inductive, go(current.motive), current.cases.map(go), go(current.target), current.parameters.map(go));
+      case "let": {
+        const nextType = go(current.valueType);
+        const nextValue = go(current.value);
+        if (current.name === name) return letIn(current.name, nextType, nextValue, current.body);
+        let binder = current.name;
+        let body = current.body;
+        if (replacementFree.has(binder)) {
+          const forbidden = new Set([...replacementFree, ...freeVariables(body), name]);
+          const renamed = freshName(binder, forbidden);
+          body = substitute(body, binder, variable(renamed));
+          binder = renamed;
+        }
+        return letIn(binder, nextType, nextValue, go(body));
+      }
       case "subst":
         return subst(go(current.proof), go(current.motive), go(current.value));
       case "pi":
@@ -174,10 +213,11 @@ export function termToString(term: Term): string {
     case "const": return term.name;
     case "pi": return `(Π ${term.param} : ${termToString(term.domain)}, ${termToString(term.codomain)})`;
     case "lam": return `(λ ${term.param} : ${termToString(term.paramType)}, ${termToString(term.body)})`;
+    case "let": return `(let ${term.name} : ${termToString(term.valueType)} := ${termToString(term.value)}; ${termToString(term.body)})`;
     case "app": return `(${termToString(term.fn)} ${termToString(term.arg)})`;
     case "eq": return `(${termToString(term.left)} = ${termToString(term.right)})`;
     case "refl": return `refl ${termToString(term.value)}`;
-    case "recursor": return `${term.inductive}.rec ${term.cases.map(termToString).join(" ")} ${termToString(term.target)}`;
+    case "recursor": return `${term.inductive}.rec${term.parameters.length === 0 ? "" : ` [${term.parameters.map(termToString).join(", ")}]`} ${term.cases.map(termToString).join(" ")} ${termToString(term.target)}`;
     case "subst": return `subst ${termToString(term.proof)} ${termToString(term.motive)} ${termToString(term.value)}`;
   }
 }

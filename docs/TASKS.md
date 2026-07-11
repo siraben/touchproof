@@ -10,8 +10,8 @@
 - [x] An accumulator-reverse lesson that requires a generalized induction
       hypothesis.
 - [x] Predicative dependent kernel with universes, `Π`, lambda, application,
-      equality, equality elimination, inductive declarations, recursors, and
-      beta/delta/iota conversion.
+      local definitions, equality, equality elimination, parameterized inductive
+      declarations, recursors, and beta/delta/iota/zeta conversion.
 - [x] Strict positivity, universe, duplicate declaration, malformed recursor,
       and alpha-capture rejection tests.
 - [x] Checked definitions and theorem declarations with a zero-axiom standard
@@ -23,8 +23,10 @@
 
 ## Next core extensions
 
-- [ ] Universe-polymorphic datatype parameters rather than the curriculum's
-      erased element universe.
+- [x] Checked explicit datatype parameters and parameter-aware recursor
+      reduction.
+- [ ] Universe-level parameters and a polymorphic surface elaborator rather
+      than the curriculum certificate's erased element universe.
 - [ ] Indexed inductive families and dependent pattern matching.
 - [ ] Surface elaboration with implicit arguments, metavariables, and typed
       holes for free-form theorem authoring.
