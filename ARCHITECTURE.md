@@ -30,12 +30,18 @@ occurrence outside a direct strictly-positive field. Recursor motives and every
 constructor branch are checked before elimination is accepted. Conversion
 implements beta, delta, iota, and zeta reduction.
 
-The standard environment is constructed only through these checking paths.
+Kernel environments are opaque immutable values rather than structurally
+compatible maps; every judgment rejects forged environment objects. The public
+declaration API separates checked definitions from explicit axioms;
+constructor and inductive metadata cannot enter through either path. The
+standard environment is constructed only through checked-definition and
+inductive paths, and final certificate assembly calls `assertAxiomFree`.
 Programs such as negation, addition, append, map, reverse, and accumulator
 reverse are lambda terms over recursors. Their equations reduce by conversion.
 Equality combinators and reusable list theorems are ordinary checked proof terms.
-An inventory test ensures every global declaration is either generated
-inductive metadata or has a checked value.
+Inventory and adversarial tests ensure every global declaration is either
+generated inductive metadata or has a checked value, while assumptions remain
+named and cause certification to fail.
 
 ## Exact visual certificates
 

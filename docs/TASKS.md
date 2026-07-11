@@ -16,6 +16,8 @@
       and alpha-capture rejection tests.
 - [x] Checked definitions and theorem declarations with a zero-axiom standard
       environment inventory.
+- [x] Explicit axiom declarations, generated-metadata rejection, and mandatory
+      axiom-free final certification.
 - [x] Exact proof-term assembly from every visible transition and end-to-end
       checking for every lesson.
 - [x] Browser-local persistence, import/export, undo/redo, strict decoding,

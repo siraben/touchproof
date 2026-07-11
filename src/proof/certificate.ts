@@ -1,4 +1,4 @@
-import { check, definitionallyEqual, type Context, type Environment } from "../kernel/checker.js";
+import { assertAxiomFree, check, definitionallyEqual, type Context, type Environment } from "../kernel/checker.js";
 import {
   app,
   apps,
@@ -288,6 +288,7 @@ export interface KernelCertificate {
 export function checkProofSession(value: unknown): KernelCertificate {
   const session = decodeProofSession(value);
   const environment = touchProofEnvironment();
+  assertAxiomFree(environment);
   for (const goal of session.goals) validateOpenGoal(goal, environment);
   if (session.goals.some((goal) => goal.status !== "solved")) {
     return { environment, script: session.goals.map((goal) => termToString(equalityType(goal, goal.left, goal.right))).join("\n") };

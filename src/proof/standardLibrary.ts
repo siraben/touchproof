@@ -1,4 +1,4 @@
-import { check, checkDeclaration, declareInductive, type Declaration, type Environment } from "../kernel/checker.js";
+import { check, checkDeclaration, declareInductive, emptyEnvironment, type DefinitionInput, type Environment } from "../kernel/checker.js";
 import {
   app,
   apps,
@@ -23,8 +23,8 @@ function pis(bindings: readonly (readonly [string, Term])[], result: Term): Term
 }
 
 export function touchProofEnvironment(): Environment {
-  let env: Environment = new Map();
-  const add = (name: string, declaration: Declaration): void => { env = checkDeclaration(name, declaration, env); };
+  let env: Environment = emptyEnvironment();
+  const add = (name: string, declaration: DefinitionInput): void => { env = checkDeclaration(name, declaration, env); };
   env = declareInductive("Elem", [{ name: "element", fields: [] }], env);
   env = declareInductive("Bool", [
     { name: "true", fields: [] },
@@ -150,7 +150,7 @@ export function touchProofEnvironment(): Environment {
   return env;
 }
 
-function addDefinitionalEquations(add: (name: string, declaration: Declaration) => void): void {
+function addDefinitionalEquations(add: (name: string, declaration: DefinitionInput) => void): void {
   const functionType = arrow(c("Elem"), c("Elem"));
   const definitions: readonly [string, Term, Term][] = [
     ["add_zero_left", pis([["m", c("Nat")]], equal(c("Nat"), apps(c("add"), c("zero"), v("m")), v("m"))),

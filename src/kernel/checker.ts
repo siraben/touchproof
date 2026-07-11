@@ -12,6 +12,7 @@ import {
 } from "./term.js";
 
 export interface Declaration {
+  readonly kind: "definition" | "axiom" | "inductive" | "constructor";
   readonly type: Term;
   readonly value?: Term;
   readonly inductive?: InductiveDeclaration;
@@ -19,6 +20,11 @@ export interface Declaration {
     readonly inductive: string;
     readonly index: number;
   };
+}
+
+export interface DefinitionInput {
+  readonly type: Term;
+  readonly value: Term;
 }
 
 export interface ConstructorField {
@@ -49,7 +55,45 @@ export interface InductiveParameterInput {
   readonly type: Term;
 }
 
-export type Environment = ReadonlyMap<string, Declaration>;
+const environmentBrand: unique symbol = Symbol("TouchProofEnvironment");
+
+export interface Environment extends ReadonlyMap<string, Declaration> {
+  readonly [environmentBrand]: true;
+}
+
+class CheckedEnvironment implements Environment {
+  readonly [environmentBrand] = true as const;
+
+  readonly #declarations: ReadonlyMap<string, Declaration>;
+
+  constructor(entries: Iterable<readonly [string, Declaration]> = []) {
+    this.#declarations = new Map(entries);
+  }
+
+  get size(): number { return this.#declarations.size; }
+  get(name: string): Declaration | undefined { return this.#declarations.get(name); }
+  has(name: string): boolean { return this.#declarations.has(name); }
+  entries(): MapIterator<[string, Declaration]> { return this.#declarations.entries(); }
+  keys(): MapIterator<string> { return this.#declarations.keys(); }
+  values(): MapIterator<Declaration> { return this.#declarations.values(); }
+  [Symbol.iterator](): MapIterator<[string, Declaration]> { return this.#declarations[Symbol.iterator](); }
+  forEach(callback: (value: Declaration, key: string, map: ReadonlyMap<string, Declaration>) => void, thisArg?: unknown): void {
+    this.#declarations.forEach((value, key) => callback.call(thisArg, value, key, this));
+  }
+}
+
+export function emptyEnvironment(): Environment {
+  return new CheckedEnvironment();
+}
+
+function extendEnvironment(environment: Environment, name: string, declaration: Declaration): Environment {
+  assertCheckedEnvironment(environment);
+  return new CheckedEnvironment([...environment, [name, declaration]]);
+}
+
+function assertCheckedEnvironment(environment: Environment): void {
+  if (!(environment instanceof CheckedEnvironment)) throw new KernelError("untrusted kernel environment");
+}
 export type Context = ReadonlyMap<string, Term>;
 
 export class KernelError extends Error {
@@ -66,6 +110,7 @@ function substituteMany(term: Term, replacements: ReadonlyMap<string, Term>): Te
 }
 
 export function normalize(term: Term, environment: Environment): Term {
+  assertCheckedEnvironment(environment);
   switch (term.kind) {
     case "type":
     case "var":
@@ -220,6 +265,7 @@ function alphaEqual(
 }
 
 export function definitionallyEqual(left: Term, right: Term, environment: Environment): boolean {
+  assertCheckedEnvironment(environment);
   return alphaEqual(normalize(left, environment), normalize(right, environment));
 }
 
@@ -232,6 +278,7 @@ function universeOf(term: Term, context: Context, environment: Environment): num
 }
 
 export function infer(term: Term, context: Context, environment: Environment): Term {
+  assertCheckedEnvironment(environment);
   switch (term.kind) {
     case "type": return { kind: "type", level: term.level + 1 };
     case "var": {
@@ -331,6 +378,7 @@ export function infer(term: Term, context: Context, environment: Environment): T
 }
 
 export function check(term: Term, expected: Term, context: Context, environment: Environment): void {
+  assertCheckedEnvironment(environment);
   if (term.kind === "lam") {
     const normalizedExpected = normalize(expected, environment);
     if (normalizedExpected.kind === "pi") {
@@ -353,15 +401,35 @@ export function check(term: Term, expected: Term, context: Context, environment:
 
 export function checkDeclaration(
   name: string,
-  declaration: Declaration,
+  declaration: DefinitionInput,
   environment: Environment,
 ): Environment {
   if (environment.has(name)) throw new KernelError(`duplicate declaration ${name}`);
+  const untrusted = declaration as DefinitionInput & { readonly inductive?: unknown; readonly constructorInfo?: unknown; readonly kind?: unknown };
+  if (untrusted.inductive !== undefined || untrusted.constructorInfo !== undefined || untrusted.kind !== undefined) {
+    throw new KernelError("declaration metadata is generated only by the kernel");
+  }
+  if (declaration.value === undefined) throw new KernelError(`definition ${name} requires a checked value`);
   universeOf(declaration.type, new Map(), environment);
-  if (declaration.value !== undefined) check(declaration.value, declaration.type, new Map(), environment);
-  const next = new Map(environment);
-  next.set(name, declaration);
-  return next;
+  check(declaration.value, declaration.type, new Map(), environment);
+  return extendEnvironment(environment, name, { kind: "definition", ...declaration });
+}
+
+/** Add a visible assumption. Completed TouchProof certificates reject environments containing axioms. */
+export function declareAxiom(name: string, axiomType: Term, environment: Environment): Environment {
+  if (environment.has(name)) throw new KernelError(`duplicate declaration ${name}`);
+  universeOf(axiomType, new Map(), environment);
+  return extendEnvironment(environment, name, { kind: "axiom", type: axiomType });
+}
+
+export function environmentAxioms(environment: Environment): readonly string[] {
+  assertCheckedEnvironment(environment);
+  return [...environment].filter(([, declaration]) => declaration.kind === "axiom").map(([name]) => name);
+}
+
+export function assertAxiomFree(environment: Environment): void {
+  const axioms = environmentAxioms(environment);
+  if (axioms.length > 0) throw new KernelError(`environment contains axioms: ${axioms.join(", ")}`);
 }
 
 function containsConstant(term: Term, name: string): boolean {
@@ -418,7 +486,7 @@ export function declareParameterizedInductive(
   const inductiveType = parameters.reduceRight<Term>((result, parameter) => pi(parameter.name, parameter.type, result), { kind: "type", level });
   const names = new Set<string>();
   const shapes: InductiveConstructor[] = [];
-  let provisional: Environment = new Map(environment).set(name, { type: inductiveType });
+  let provisional = extendEnvironment(environment, name, { kind: "inductive", type: inductiveType });
   for (const constructor of constructors) {
     if (names.has(constructor.name) || provisional.has(constructor.name)) throw new KernelError(`duplicate constructor ${constructor.name}`);
     names.add(constructor.name);
@@ -439,14 +507,16 @@ export function declareParameterizedInductive(
     }
     const fieldsType = fields.reduceRight<Term>((result, field) => pi(field.name, field.type, result), appliedInductive);
     const constructorType = parameters.reduceRight<Term>((result, parameter) => pi(parameter.name, parameter.type, result), fieldsType);
-    provisional = new Map(provisional).set(constructor.name, {
+    provisional = extendEnvironment(provisional, constructor.name, {
+      kind: "constructor",
       type: constructorType,
       constructorInfo: { inductive: name, index: shapes.length },
     });
     shapes.push({ name: constructor.name, fields });
   }
   const inductive: InductiveDeclaration = { name, level, parameters: parameterFields, constructors: shapes };
-  const result = new Map(provisional);
-  result.set(name, { type: inductiveType, inductive });
-  return result;
+  return new CheckedEnvironment([
+    ...[...provisional].filter(([declarationName]) => declarationName !== name),
+    [name, { kind: "inductive", type: inductiveType, inductive }],
+  ]);
 }
