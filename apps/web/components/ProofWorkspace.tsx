@@ -219,12 +219,16 @@ export function ProofWorkspace() {
   const currentGoal = state?.session.goals.find((goal) => goal.id === state.session.focusedGoalId);
   const progress = useMemo(() => state === undefined ? { solved: 0, total: 0 } : proofProgress(state.session), [state]);
   const solved = progress.total > 0 && progress.solved === progress.total;
-  const analysisMove = state?.moves.find((move) => move.kind === "induction" || move.kind === "cases");
+  // Any move that lands in the analysis tray: cases/induction on equation
+  // goals, destruct/split on proposition goals (they share the drop zone).
+  const analysisMove = state?.moves.find((move) => move.dropTarget === "analysis-zone");
   const currentLesson = state?.lessons.find((lesson) => lesson.id === state.session.lessonId);
   const lessonIndex = state?.lessons.findIndex((lesson) => lesson.id === state.session.lessonId) ?? -1;
   const nextLesson = lessonIndex >= 0 ? state?.lessons[lessonIndex + 1] : undefined;
   const contextualMoves = state?.moves.filter((move) => move.handle === selection?.handle) ?? [];
-  const closeMove = state?.moves.find((move) => move.kind === "close");
+  // The move that seals the focused goal: reflexivity on equation goals,
+  // exact-a-hypothesis on proposition goals. Both drive the closable pulse.
+  const closeMove = state?.moves.find((move) => move.kind === "close" || move.kind === "exact");
   const undo = () => {
     if (busy) return;
     const previous = undoStack.at(-1);
@@ -287,7 +291,7 @@ export function ProofWorkspace() {
         kernelStatus={state.session.kernelStatus}
       />
 
-      <TitleBlock lesson={currentLesson} solved={progress.solved} total={progress.total} />
+      <TitleBlock lesson={currentLesson} propositional={state.session.theoremProposition !== undefined} solved={progress.solved} total={progress.total} />
 
       <div className="body-grid">
         <LearningPath

@@ -21,9 +21,17 @@ async function finishLesson(backend: BrowserProofBackend, lessonId: string, limi
     // General mode offers analysis moves on every goal, repeatedly; the greedy
     // driver only takes one before the first split or it would recurse forever.
     const unsplit = state.session.ancestors.length === 0;
+    // Propositional preferences: intro peels implications, exact closes as soon
+    // as a hypothesis matches, destruct unpacks a ∧ hypothesis before split
+    // divides the goal (destruct and split each consume their site, so unlike
+    // cases/induction they cannot re-offer forever).
     const move = (unsplit ? state.moves.find((candidate) => candidate.kind === "cases" || candidate.kind === "induction") : undefined)
+      ?? state.moves.find((candidate) => candidate.kind === "intro")
       ?? state.moves.find((candidate) => candidate.kind === "reduce")
       ?? state.moves.find((candidate) => candidate.kind === "rewrite")
+      ?? state.moves.find((candidate) => candidate.kind === "exact")
+      ?? state.moves.find((candidate) => candidate.kind === "destruct")
+      ?? state.moves.find((candidate) => candidate.kind === "split")
       ?? state.moves.find((candidate) => candidate.kind === "close");
     if (move === undefined) throw new Error("proof became stuck");
     state = await backend.dispatch(state.session, { kind: "apply-move", moveId: move.id });
@@ -48,6 +56,27 @@ describe("browser dependent proof backend", () => {
     expect(state.session.kernelStatus).toBe("checked");
     expect(state.session.theoremContext).toContain("f : B → C");
     expect(state.session.goals.some((goal) => goal.steps.some((step) => step.reason === "rewrite with IH"))).toBe(true);
+  });
+
+  it("completes every propositional lesson with intro/exact/destruct/split", async () => {
+    const backend = new BrowserProofBackend();
+    for (const lessonId of ["prop-identity", "prop-and-left", "prop-const", "prop-and-swap"]) {
+      const state = await finishLesson(backend, lessonId);
+      expect(state.session.kernelStatus).toBe("checked");
+      expect(state.evidence.scope).toBe("completed-theorem");
+      expect(state.script).not.toContain("sorry");
+      // The assembled certificate is a λ-term over the propositional atoms.
+      expect(state.script).toContain("λ");
+    }
+  });
+
+  it("records intro and exact steps on the and-left walkthrough", async () => {
+    const state = await finishLesson(new BrowserProofBackend(), "prop-and-left");
+    // The intro happened before the destruct split, so it lives on the ancestor;
+    // the exact closed the leaf obligation.
+    const reasons = [...state.session.ancestors, ...state.session.goals].flatMap((goal) => goal.steps.map((step) => step.reason));
+    expect(reasons.some((reason) => reason.startsWith("intro "))).toBe(true);
+    expect(reasons.some((reason) => reason.startsWith("exact "))).toBe(true);
   });
 
   it("never trusts a persisted checked status", async () => {

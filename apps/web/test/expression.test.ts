@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { parseProgramExpr } from "@touchproof/core";
+import { createLessonSession, isPropositionGoal, parseProgramExpr } from "@touchproof/core";
+import { PropositionCard } from "../components/EquationCard";
 import { Expression } from "../components/Expression";
 
 const markupOf = (source: string): string =>
@@ -40,5 +41,35 @@ describe("interactive expression renderer", () => {
     expect(textOf("apply(f, apply(g, x))")).toBe("f(gx)");
     expect(textOf("apply(compose(f, g), x)")).toBe("(f ∘\u00A0g)x");
     expect(textOf("rev(cons(x, xs))")).toBe("rev(x ::\u00A0xs)");
+  });
+
+  it("renders propositional connectives with the table's minimal parens", () => {
+    // infixr 4 AND binds tighter than infixr 3 IMP: the antecedent stays bare;
+    expect(textOf("imp(and(P, Q), P)")).toBe("P \u2227\u00A0Q \u2192\u00A0P");
+    // a nested implication on the left is wrapped, and the right side is not.
+    expect(textOf("imp(imp(P, Q), P)")).toBe("(P \u2192\u00A0Q) \u2192\u00A0P");
+    expect(textOf("imp(P, imp(Q, P))")).toBe("P \u2192\u00A0Q \u2192\u00A0P");
+  });
+});
+
+describe("proposition hero card", () => {
+  it("shows the goal proposition with no equals sign and a \u2713 close affordance", () => {
+    const session = createLessonSession("prop-and-left");
+    const goal = session.goals[0]!;
+    if (!isPropositionGoal(goal)) throw new Error("prop-and-left should open on a proposition goal");
+    const markup = renderToStaticMarkup(createElement(PropositionCard, {
+      proposition: goal.proposition,
+      moves: [],
+      closeMove: undefined,
+      busy: false,
+      solved: false,
+      onMove: () => undefined,
+    }));
+    const text = markup.replace(/<[^>]+>/g, "");
+    expect(text).toBe("P \u2227\u00A0Q \u2192\u00A0P\u2713");
+    expect(text).not.toContain("=");
+    expect(markup).toContain("proposition-card");
+    // No exact move yet, so the seal must not pulse.
+    expect(markup).not.toContain("closable");
   });
 });

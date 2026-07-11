@@ -3,6 +3,7 @@
 import {
   definitionByName,
   inductiveByName,
+  isPropositionGoal,
   type Lesson,
   type ProofMove,
 } from "@touchproof/core";
@@ -11,7 +12,7 @@ import type { ProofSnapshot } from "@/lib/proof/browserProofBackend";
 import { dropMove } from "@/lib/viewModel";
 import { CanvasCard } from "./CanvasCard";
 import { DefinitionCard } from "./DefinitionCard";
-import { EquationCard } from "./EquationCard";
+import { EquationCard, PropositionCard } from "./EquationCard";
 import { Expression } from "./Expression";
 import { MoveContextMenu } from "./MoveContextMenu";
 import { MovePalette } from "./MovePalette";
@@ -86,7 +87,7 @@ export function ProofCanvas({
             key={hypothesis.id}
             role={moves.some((move) => move.handle === hypothesis.id) ? "button" : undefined}
             tabIndex={moves.some((move) => move.handle === hypothesis.id) ? 0 : undefined}
-            title="Click for rewrite options, or drag onto a matching expression"
+            title={"proposition" in hypothesis ? "Click for proof actions, or drag onto the goal" : "Click for rewrite options, or drag onto a matching expression"}
             onClick={(event) => {
               if (!moves.some((move) => move.handle === hypothesis.id)) return;
               event.stopPropagation();
@@ -103,15 +104,26 @@ export function ProofCanvas({
               event.dataTransfer.effectAllowed = "move";
             }}
           >
-            <span>{hypothesis.binders === undefined ? hypothesis.name : `∀ ${hypothesis.binders.map((binder) => binder.name).join(" ")}, ${hypothesis.name}`}</span>
-            <div><Expression expression={hypothesis.left} moves={[]} onMove={() => undefined} /> = <Expression expression={hypothesis.right} moves={[]} onMove={() => undefined} /></div>
-            <small>Click for options or drag onto a matching expression</small>
+            {"proposition" in hypothesis ? (
+              /* Propositional hypothesis: `H : P ∧ Q` on the same mint card. */
+              <>
+                <span>{hypothesis.name}</span>
+                <div><Expression expression={hypothesis.proposition} moves={[]} onMove={() => undefined} /></div>
+                <small>Click for options or drag onto the goal</small>
+              </>
+            ) : (
+              <>
+                <span>{hypothesis.binders === undefined ? hypothesis.name : `∀ ${hypothesis.binders.map((binder) => binder.name).join(" ")}, ${hypothesis.name}`}</span>
+                <div><Expression expression={hypothesis.left} moves={[]} onMove={() => undefined} /> = <Expression expression={hypothesis.right} moves={[]} onMove={() => undefined} /></div>
+                <small>Click for options or drag onto a matching expression</small>
+              </>
+            )}
           </div>
         ))}
         {analysisMove !== undefined && (
           <div
             id="analysis-zone"
-            className={`induction-zone ${preview !== undefined && (preview.kind === "induction" || preview.kind === "cases") ? "preview-dest" : ""}`}
+            className={`induction-zone ${preview !== undefined && preview.dropTarget === "analysis-zone" ? "preview-dest" : ""}`}
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();
@@ -120,10 +132,29 @@ export function ProofCanvas({
               if (move !== undefined) onSend(move.id);
             }}
           >
-            <strong>{analysisMove.kind === "cases" ? "Analyze this value" : "Use induction"}</strong>
+            <strong>
+              {analysisMove.kind === "cases" ? "Analyze this value"
+                : analysisMove.kind === "induction" ? "Use induction"
+                : analysisMove.kind === "destruct" ? "Take a conjunction apart"
+                : "Prove each half"}
+            </strong>
             {/* Drag is pointer-only; on touch (CSS ≤800px) swap to the tap route. */}
-            <span className="hint-drag">Drag <code>{analysisMove.variable}</code> here—or click it and choose the action.</span>
-            <span className="hint-tap">Tap <code>{analysisMove.variable}</code> and choose the action.</span>
+            {analysisMove.kind === "destruct" ? (
+              <>
+                <span className="hint-drag">Drag <code>{currentGoal.hypotheses.find((hypothesis) => hypothesis.id === analysisMove.hypothesisId)?.name ?? "the ∧ hypothesis"}</code> here—or click it and choose the action.</span>
+                <span className="hint-tap">Tap <code>{currentGoal.hypotheses.find((hypothesis) => hypothesis.id === analysisMove.hypothesisId)?.name ?? "the ∧ hypothesis"}</code> and choose the action.</span>
+              </>
+            ) : analysisMove.kind === "split" ? (
+              <>
+                <span className="hint-drag">Drag the goal&rsquo;s <code>∧</code> here—or click it and choose the action.</span>
+                <span className="hint-tap">Tap the goal&rsquo;s <code>∧</code> and choose the action.</span>
+              </>
+            ) : (
+              <>
+                <span className="hint-drag">Drag <code>{analysisMove.variable}</code> here—or click it and choose the action.</span>
+                <span className="hint-tap">Tap <code>{analysisMove.variable}</code> and choose the action.</span>
+              </>
+            )}
           </div>
         )}
       </CanvasCard>
@@ -162,16 +193,27 @@ export function ProofCanvas({
         </DefinitionCard>
       ))}
       <div className="case-label">Current obligation · {currentGoal.label}</div>
-      <EquationCard
-        left={currentGoal.left}
-        right={currentGoal.right}
-        moves={moves}
-        closeMove={closeMove}
-        busy={busy}
-        solved={solved}
-        generalizedVariables={state.session.generalizedVariables}
-        onMove={onSend}
-      />
+      {isPropositionGoal(currentGoal) ? (
+        <PropositionCard
+          proposition={currentGoal.proposition}
+          moves={moves}
+          closeMove={closeMove}
+          busy={busy}
+          solved={solved}
+          onMove={onSend}
+        />
+      ) : (
+        <EquationCard
+          left={currentGoal.left}
+          right={currentGoal.right}
+          moves={moves}
+          closeMove={closeMove}
+          busy={busy}
+          solved={solved}
+          generalizedVariables={state.session.generalizedVariables}
+          onMove={onSend}
+        />
+      )}
       {selection !== undefined && contextualMoves.length > 0 && (
         <MoveContextMenu
           moves={contextualMoves}
@@ -185,6 +227,17 @@ export function ProofCanvas({
         <span className="cursor-icon">{solved ? "✓" : "↖"}</span>
         {solved ? (
           "Proved and kernel-checked. Read it back in the Notebook, or continue."
+        ) : moves.some((move) => move.kind === "exact") ? (
+          /* Exact closes a proposition goal: drag route on pointer devices,
+             tap route (hypothesis card -> menu) on touch. */
+          <>
+            <span className="hint-drag">Drag the matching hypothesis onto the goal</span>
+            <span className="hint-tap">Tap the matching hypothesis, then choose Exact</span>
+          </>
+        ) : moves.some((move) => move.kind === "intro") ? (
+          "Touch the shaded assumption to bring it into scope"
+        ) : moves.some((move) => move.kind === "destruct" || move.kind === "split") ? (
+          "Touch the goal or a hypothesis to see what you can do"
         ) : moves.some((move) => move.kind === "rewrite") ? (
           /* Drag is pointer-only; the tap route (tap the IH card -> menu) covers
              the same move on touch, so show a tap-worded hint on mobile where

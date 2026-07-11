@@ -56,3 +56,54 @@ export function EquationCard({
     </ScopeBox>
   );
 }
+
+/** The hero sheet for a propositional obligation: one centered proposition on
+ * the same .equation-card vellum, no `=`. The close affordance is the `exact`
+ * move — a ✓ button that carries the same closable pulse the `=` has on
+ * equation goals, and doubles as the drop target for a hypothesis dragged onto
+ * the goal. Q.E.D. stamp and staggered reveal ride along unchanged. */
+export function PropositionCard({
+  proposition,
+  moves,
+  closeMove,
+  busy,
+  solved,
+  onMove,
+}: {
+  proposition: ProgramExpr;
+  moves: readonly ProofMove[];
+  closeMove: ProofMove | undefined;
+  busy: boolean;
+  solved: boolean;
+  onMove: (moveId: string) => void;
+}) {
+  return (
+    <div className={`equation-card proposition-card ${busy ? "busy" : ""}`} onClick={(event) => event.stopPropagation()}>
+      <Expression expression={proposition} moves={moves} onMove={onMove} />
+      {/* The close affordance for a proposition is `exact`: fill the goal with a
+          matching hypothesis. It closes on click and accepts the same handle
+          drop (hypothesis id) that the goal proposition itself accepts. */}
+      <button
+        className={`equals qed-check ${closeMove === undefined ? "" : "closable"}`}
+        disabled={closeMove === undefined || busy}
+        title={closeMove === undefined ? "Introduce and use assumptions until one proves this goal" : "Close: this goal is exactly one of your assumptions"}
+        onClick={() => closeMove !== undefined && onMove(closeMove.id)}
+        onDragOver={(event) => {
+          if (closeMove === undefined) return;
+          const types = Array.from(event.dataTransfer.types);
+          if (types.includes("application/x-touchproof-handle")) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const handle = event.dataTransfer.getData("application/x-touchproof-handle");
+          const move = moves.find((candidate) => candidate.kind === "exact" && candidate.handle === handle);
+          if (move !== undefined) onMove(move.id);
+        }}
+      >✓</button>
+      {solved && (
+        <div className="qed-stamp" aria-hidden="true">Q.E.D.</div>
+      )}
+    </div>
+  );
+}
